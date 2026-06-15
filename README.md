@@ -26,9 +26,9 @@ Current verified state:
 - The memory LCD path, Pebble boot UI, launcher handoff, fixed-power/no-battery
   mode, USB CDC debug shell, frame capture, and software BOOTSEL entry have
   been hardware-tested on the Fruit Jam board.
-- Bluetooth is still bring-up work: the RP2350 NimBLE host expects an ESP32-C6
-  controller-only HCI UART firmware, not the stock WiFiNINA/AirLift firmware,
-  and advertising is still under investigation.
+- Bluetooth bring-up now reaches BLE advertising through a controller-only
+  ESP32-C6 HCI UART firmware. The phone app can see the watch as a Pebble BLE
+  peripheral; pairing and end-to-end phone services still need more testing.
 
 Useful local commands:
 

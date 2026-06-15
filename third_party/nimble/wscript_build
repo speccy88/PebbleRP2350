@@ -109,6 +109,9 @@ elif bld.env.CONFIG_SOC_RP2350:
     nimble_sources += [
         'transport/hci_fruitjam_rp2350.c',
     ]
+    nimble_env.append_value('DEFINES', [
+        'MYNEWT_VAL_BLE_HS_AUTO_START=0',
+    ])
 
 
 bld.objects(

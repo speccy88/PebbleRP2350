@@ -28,6 +28,7 @@
 
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
 #include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
+#include "soc/rp2350/rp2350/fruitjam_bt_debug.h"
 #include "system/reboot_reason.h"
 #define FRUITJAM_BOOT_PROGRESS_WRITE(stage) fruitjam_boot_progress_mark(stage)
 #define FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(stage, label) \
@@ -51,6 +52,12 @@ static bool s_fruitjam_bluetooth_holdoff;
 
 static bool prv_fruitjam_bluetooth_holdoff_active(void) {
   return s_fruitjam_bluetooth_holdoff && s_comm_override != BtCtlModeOverrideRun;
+}
+
+static void prv_fruitjam_record_ctl_state(bool active) {
+  fruitjam_bt_debug_record_ctl_state(s_comm_initialized, s_comm_enabled, s_comm_airplane_mode_on,
+                                     s_comm_is_running, s_comm_override, active,
+                                     prv_fruitjam_bluetooth_holdoff_active());
 }
 #endif
 
@@ -174,6 +181,9 @@ static void prv_comm_state_change(void *context) {
   mutex_lock(s_comm_state_change_mutex);
   s_comm_state_change_eval_is_scheduled = false;
   bool is_active_mode = bt_ctl_is_bluetooth_active();
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  prv_fruitjam_record_ctl_state(is_active_mode);
+#endif
   if (is_active_mode != s_comm_is_running) {
     if (is_active_mode) {
       prv_comm_start();
@@ -190,6 +200,9 @@ static void prv_comm_state_change(void *context) {
   }
 
   s_first_run = false;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  prv_fruitjam_record_ctl_state(bt_ctl_is_bluetooth_active());
+#endif
   mutex_unlock(s_comm_state_change_mutex);
 }
 
@@ -252,6 +265,11 @@ void bt_ctl_init(void) {
 
   s_comm_airplane_mode_on = bt_persistent_storage_get_airplane_mode_enabled();
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  if (s_comm_airplane_mode_on) {
+    bt_persistent_storage_set_airplane_mode_enabled(false);
+    s_comm_airplane_mode_on = false;
+  }
+
   RebootReason reason;
   reboot_reason_get(&reason);
   s_fruitjam_bluetooth_holdoff =
@@ -262,6 +280,9 @@ void bt_ctl_init(void) {
   }
 #endif
   s_comm_initialized = true;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  prv_fruitjam_record_ctl_state(bt_ctl_is_bluetooth_active());
+#endif
 
   gatt_client_subscription_boot();
 }

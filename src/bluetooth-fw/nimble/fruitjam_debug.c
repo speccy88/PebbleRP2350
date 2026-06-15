@@ -57,6 +57,18 @@ void fruitjam_bt_debug_record_driver_start(bool ok) {
   }
 }
 
+void fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStage stage, uint8_t driver_state,
+                                           int rc) {
+  ++s_debug.driver_stage_count;
+  s_debug.last_driver_stage = stage;
+  s_debug.driver_state = driver_state;
+  s_debug.last_driver_rc = rc;
+
+  if (stage == FruitJamBtDebugDriverStageStartEnter) {
+    ++s_debug.driver_start_enter_count;
+  }
+}
+
 void fruitjam_bt_debug_record_host_sync(void) {
   ++s_debug.host_sync_count;
 }
@@ -64,6 +76,18 @@ void fruitjam_bt_debug_record_host_sync(void) {
 void fruitjam_bt_debug_record_host_reset(int reason) {
   ++s_debug.host_reset_count;
   s_debug.last_host_reset_reason = reason;
+}
+
+void fruitjam_bt_debug_record_ctl_state(bool initialized, bool enabled, bool airplane,
+                                        bool running, int override, bool active, bool holdoff) {
+  ++s_debug.ctl_state_count;
+  s_debug.ctl_initialized = initialized;
+  s_debug.ctl_enabled = enabled;
+  s_debug.ctl_airplane = airplane;
+  s_debug.ctl_running = running;
+  s_debug.ctl_override = override;
+  s_debug.ctl_active = active;
+  s_debug.ctl_holdoff = holdoff;
 }
 
 void fruitjam_bt_debug_record_adv_data(const BLEAdData *ad_data, int adv_rc, int scan_rsp_rc) {

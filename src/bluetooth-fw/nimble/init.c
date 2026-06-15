@@ -61,6 +61,7 @@ static DriverState s_driver_state = DriverStateStopped;
 static void prv_sync_cb(void) {
   PBL_LOG_DBG("NimBLE host synchronized");
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageHostSync, s_driver_state, 0);
   fruitjam_bt_debug_record_host_sync();
 #endif
   xSemaphoreGive(s_host_started);
@@ -70,6 +71,8 @@ static void prv_sync_cb(void) {
 static void prv_reset_cb(int reason) {
   PBL_LOG_WRN("NimBLE host reset (reason: 0x%04x)", (uint16_t)reason);
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageHostReset, s_driver_state,
+                                        reason);
   fruitjam_bt_debug_record_host_reset(reason);
 #endif
 #ifdef CONFIG_SOC_SF32LB52
@@ -163,21 +166,44 @@ bool bt_driver_start(BTDriverConfig *config) {
   int rc;
   BaseType_t f_rc;
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageStartEnter, s_driver_state, 0);
+#endif
+
   if (s_driver_state == DriverStateStarted) {
     PBL_LOG_WRN("Driver already started; skipping start");
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageAlreadyStarted,
+                                          s_driver_state, 0);
+#endif
     return true;
   }
 
   if (s_driver_state != DriverStateStopped) {
     PBL_LOG_ERR("Unexpected driver state %u; refusing to start",
                   (unsigned)s_driver_state);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageBadState, s_driver_state, 0);
+#endif
     return false;
   }
 
   s_driver_state = DriverStateStarting;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageStarting, s_driver_state, 0);
+#endif
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  const bool host_enabled = ble_hs_is_enabled() != 0;
+  const bool host_synced = ble_hs_synced() != 0;
+#else
+  const bool host_enabled = false;
+  const bool host_synced = false;
+#endif
   // Drain a stale host_started signal (e.g. from an autonomous host re-sync)
   // so we wait for *this* start to sync.
-  (void)xSemaphoreTake(s_host_started, 0);
+  if (!host_enabled) {
+    (void)xSemaphoreTake(s_host_started, 0);
+  }
 
   s_dis_info = config->dis_info;
   ble_svc_dis_model_number_set(s_dis_info.model_number);
@@ -196,10 +222,25 @@ bool bt_driver_start(BTDriverConfig *config) {
   gh3x2x_tuning_service_init();
 #endif
 
-  ble_hs_sched_start();
-  f_rc = xSemaphoreTake(s_host_started, milliseconds_to_ticks(s_bt_stack_start_stop_timeout_ms));
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageServicesReady, s_driver_state,
+                                        0);
+#endif
+  if (!host_enabled) {
+    ble_hs_sched_start();
+  }
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(host_synced ? FruitJamBtDebugDriverStageSynced
+                                                    : FruitJamBtDebugDriverStageWaitSync,
+                                        s_driver_state, 0);
+#endif
+  f_rc = host_synced ? pdTRUE
+                     : xSemaphoreTake(s_host_started,
+                                      milliseconds_to_ticks(s_bt_stack_start_stop_timeout_ms));
   if (f_rc != pdTRUE) {
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageSyncTimeout, s_driver_state,
+                                          0);
     fruitjam_bt_debug_record_driver_start(false);
     return prv_stop_after_start_failure("NimBLE host start timed out; ESP HCI unavailable", false);
 #else
@@ -208,7 +249,14 @@ bool bt_driver_start(BTDriverConfig *config) {
 #endif
   }
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageSynced, s_driver_state, 0);
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageEnsureAddr, s_driver_state, 0);
+#endif
   rc = ble_hs_util_ensure_addr(0);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageAddrDone, s_driver_state, rc);
+#endif
   if (rc != 0) {
     PBL_LOG_ERR("Failed to ensure address: 0x%04x", (uint16_t)rc);
     goto err;
@@ -216,12 +264,14 @@ bool bt_driver_start(BTDriverConfig *config) {
 
   s_driver_state = DriverStateStarted;
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageStarted, s_driver_state, 0);
   fruitjam_bt_debug_record_driver_start(true);
 #endif
   return true;
 
 err:
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageError, s_driver_state, rc);
   fruitjam_bt_debug_record_driver_start(false);
   return prv_stop_after_start_failure("NimBLE host start failed", false);
 #else

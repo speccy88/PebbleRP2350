@@ -312,15 +312,24 @@ static void prv_send_tasks(void) {
 }
 
 static void prv_append_hex_bytes(char *out, const uint8_t *data, uint8_t length);
+static void prv_append_hci_cmd_history(char *out, size_t out_size,
+                                       const FruitJamEspHciDebugSnapshot *snapshot);
+static void prv_append_hci_evt_history(char *out, size_t out_size,
+                                       const FruitJamEspHciDebugSnapshot *snapshot);
+static const char *prv_bt_driver_stage_name(uint8_t stage);
 
 static void prv_send_esp(void) {
   FruitJamEspHciDebugSnapshot snapshot;
   char line[160];
   char evt_hex[FRUITJAM_ESP_HCI_DEBUG_EVT_PREFIX_SIZE * 2U + 1U];
+  char cmd_history[FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE * 11U + 1U];
+  char evt_history[FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE * 12U + 1U];
 
   fruitjam_esp_hci_debug_get_snapshot(&snapshot);
   prv_append_hex_bytes(evt_hex, snapshot.last_hci_evt_prefix,
                        snapshot.last_hci_evt_prefix_length);
+  prv_append_hci_cmd_history(cmd_history, sizeof(cmd_history), &snapshot);
+  prv_append_hci_evt_history(evt_history, sizeof(evt_history), &snapshot);
 
   int written = snprintf(line, sizeof(line),
                          "esp init=%" PRIu32 " ready=%" PRIu32 " timeout=%" PRIu32
@@ -330,10 +339,17 @@ static void prv_send_esp(void) {
   prv_usb_write_formatted_line(line, written, sizeof(line));
 
   written = snprintf(line, sizeof(line),
-                     "esp rx=%" PRIu32 " tx=%" PRIu32 " rxerr=%" PRIu32 " txtimeout=%" PRIu32
-                     " last_rx=%02x last_err=%02x\r\n",
+                     "esp rx=%" PRIu32 " tx=%" PRIu32 " rxerr=%" PRIu32 " rxirq=%" PRIu32
+                     " rxdrops=%" PRIu32 " txtimeout=%" PRIu32 "\r\n",
                      snapshot.rx_bytes, snapshot.tx_bytes, snapshot.rx_error_count,
-                     snapshot.tx_timeout_count, snapshot.last_rx_byte, snapshot.last_rx_error);
+                     snapshot.rx_irq_count, snapshot.rx_ring_drop_count,
+                     snapshot.tx_timeout_count);
+  prv_usb_write_formatted_line(line, written, sizeof(line));
+
+  written = snprintf(line, sizeof(line),
+                     "esp last_rx=%02x last_err=%02x rxring=%u high=%u\r\n",
+                     snapshot.last_rx_byte, snapshot.last_rx_error, snapshot.rx_ring_depth,
+                     snapshot.rx_ring_high_watermark);
   prv_usb_write_formatted_line(line, written, sizeof(line));
 
   written = snprintf(line, sizeof(line),
@@ -358,6 +374,14 @@ static void prv_send_esp(void) {
                      snapshot.last_hci_evt_length, snapshot.last_hci_evt_opcode,
                      snapshot.last_hci_evt_status, evt_hex);
   prv_usb_write_formatted_line(line, written, sizeof(line));
+
+  written = snprintf(line, sizeof(line), "hci cmd_hist seq=%" PRIu32 " %s\r\n",
+                     snapshot.hci_cmd_seq, cmd_history);
+  prv_usb_write_formatted_line(line, written, sizeof(line));
+
+  written = snprintf(line, sizeof(line), "hci evt_hist seq=%" PRIu32 " %s\r\n",
+                     snapshot.hci_evt_seq, evt_history);
+  prv_usb_write_formatted_line(line, written, sizeof(line));
 }
 
 static void prv_append_hex_bytes(char *out, const uint8_t *data, uint8_t length) {
@@ -366,6 +390,74 @@ static void prv_append_hex_bytes(char *out, const uint8_t *data, uint8_t length)
     out[i * 2U + 1U] = prv_hex_digit(data[i]);
   }
   out[length * 2U] = '\0';
+}
+
+static void prv_append_hci_cmd_history(char *out, size_t out_size,
+                                       const FruitJamEspHciDebugSnapshot *snapshot) {
+  uint32_t count = snapshot->hci_cmd_seq;
+  size_t used = 0U;
+
+  if (out_size == 0U) {
+    return;
+  }
+  out[0] = '\0';
+
+  if (count > FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE) {
+    count = FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE;
+  }
+
+  const uint32_t start = snapshot->hci_cmd_seq - count;
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint32_t seq = start + i;
+    const uint8_t index = (uint8_t)(seq & (FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE - 1U));
+    const FruitJamEspHciDebugCmdEntry *entry = &snapshot->hci_cmd_history[index];
+    const int written = snprintf(out + used, out_size - used, "%s%04x:%02x:%u",
+                                 (i == 0U) ? "" : ",", entry->opcode, entry->length,
+                                 (unsigned)entry->ok);
+
+    if (written < 0) {
+      break;
+    }
+    if ((size_t)written >= out_size - used) {
+      out[out_size - 1U] = '\0';
+      break;
+    }
+    used += (size_t)written;
+  }
+}
+
+static void prv_append_hci_evt_history(char *out, size_t out_size,
+                                       const FruitJamEspHciDebugSnapshot *snapshot) {
+  uint32_t count = snapshot->hci_evt_seq;
+  size_t used = 0U;
+
+  if (out_size == 0U) {
+    return;
+  }
+  out[0] = '\0';
+
+  if (count > FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE) {
+    count = FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE;
+  }
+
+  const uint32_t start = snapshot->hci_evt_seq - count;
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint32_t seq = start + i;
+    const uint8_t index = (uint8_t)(seq & (FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE - 1U));
+    const FruitJamEspHciDebugEvtEntry *entry = &snapshot->hci_evt_history[index];
+    const int written = snprintf(out + used, out_size - used, "%s%02x:%04x:%02x",
+                                 (i == 0U) ? "" : ",", entry->code, entry->opcode,
+                                 entry->status);
+
+    if (written < 0) {
+      break;
+    }
+    if ((size_t)written >= out_size - used) {
+      out[out_size - 1U] = '\0';
+      break;
+    }
+    used += (size_t)written;
+  }
 }
 
 static void prv_send_bt(void) {
@@ -380,11 +472,25 @@ static void prv_send_bt(void) {
 
   int written =
       snprintf(line, sizeof(line),
-               "bt driver start=%" PRIu32 " ok=%" PRIu32 " fail=%" PRIu32
-               " sync=%" PRIu32 " reset=%" PRIu32 " reset_reason=%" PRId32 "\r\n",
-               snapshot.driver_start_count, snapshot.driver_start_ok_count,
-               snapshot.driver_start_fail_count, snapshot.host_sync_count,
-               snapshot.host_reset_count, snapshot.last_host_reset_reason);
+               "bt driver enter=%" PRIu32 " done=%" PRIu32 " ok=%" PRIu32 " fail=%" PRIu32
+               " stage=%u:%s state=%u rc=%" PRId32 "\r\n",
+               snapshot.driver_start_enter_count, snapshot.driver_start_count,
+               snapshot.driver_start_ok_count, snapshot.driver_start_fail_count,
+               snapshot.last_driver_stage, prv_bt_driver_stage_name(snapshot.last_driver_stage),
+               snapshot.driver_state, snapshot.last_driver_rc);
+  prv_usb_write_formatted_line(line, written, sizeof(line));
+
+  written =
+      snprintf(line, sizeof(line),
+               "bt host sync=%" PRIu32 " reset=%" PRIu32 " reset_reason=%" PRId32
+               " ctl=%" PRIu32 " init=%u enabled=%u airplane=%u active=%u running=%u"
+               " override=%" PRId32 " holdoff=%u\r\n",
+               snapshot.host_sync_count, snapshot.host_reset_count,
+               snapshot.last_host_reset_reason, snapshot.ctl_state_count,
+               snapshot.ctl_initialized ? 1U : 0U, snapshot.ctl_enabled ? 1U : 0U,
+               snapshot.ctl_airplane ? 1U : 0U, snapshot.ctl_active ? 1U : 0U,
+               snapshot.ctl_running ? 1U : 0U, snapshot.ctl_override,
+               snapshot.ctl_holdoff ? 1U : 0U);
   prv_usb_write_formatted_line(line, written, sizeof(line));
 
   written =
@@ -418,6 +524,43 @@ static void prv_send_bt(void) {
 
   written = snprintf(line, sizeof(line), "bt adv_hex ad=%s scan=%s\r\n", ad_hex, scan_hex);
   prv_usb_write_formatted_line(line, written, sizeof(line));
+}
+
+static const char *prv_bt_driver_stage_name(uint8_t stage) {
+  switch (stage) {
+    case FruitJamBtDebugDriverStageIdle:
+      return "idle";
+    case FruitJamBtDebugDriverStageHostSync:
+      return "host-sync";
+    case FruitJamBtDebugDriverStageHostReset:
+      return "host-reset";
+    case FruitJamBtDebugDriverStageStartEnter:
+      return "start-enter";
+    case FruitJamBtDebugDriverStageAlreadyStarted:
+      return "already";
+    case FruitJamBtDebugDriverStageBadState:
+      return "bad-state";
+    case FruitJamBtDebugDriverStageStarting:
+      return "starting";
+    case FruitJamBtDebugDriverStageServicesReady:
+      return "svc-ready";
+    case FruitJamBtDebugDriverStageWaitSync:
+      return "wait-sync";
+    case FruitJamBtDebugDriverStageSyncTimeout:
+      return "sync-timeout";
+    case FruitJamBtDebugDriverStageSynced:
+      return "synced";
+    case FruitJamBtDebugDriverStageEnsureAddr:
+      return "ensure-addr";
+    case FruitJamBtDebugDriverStageAddrDone:
+      return "addr-done";
+    case FruitJamBtDebugDriverStageStarted:
+      return "started";
+    case FruitJamBtDebugDriverStageError:
+      return "error";
+    default:
+      return "unknown";
+  }
 }
 
 static void prv_clear_fault_state(void) {

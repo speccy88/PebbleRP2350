@@ -30,6 +30,9 @@ Current hardware-verified behavior:
 - The CDC `frame` command captures the last 144x168 1bpp LCD framebuffer sent by
   the display driver; it can be converted with
   `tools/fruitjam_cdc_frame.py -p /dev/cu.usbmodemFJRP23501 -o /tmp/fruitjam_latest.png`.
+- Bluetooth reaches NimBLE host start and BLE advertising through the Fruit Jam
+  ESP32-C6 controller-only HCI UART firmware. A hardware CDC snapshot showed
+  `bt driver ... ok=1`, `adv active=1`, and local name `Pebble A35A`.
 - The CDC `bootsel` command now uses the RP2350 boot ROM path and has been
   tested to mount `/Volumes/RP2350`; 1200-baud CDC reset-to-BOOTSEL uses the
   same helper.
@@ -48,11 +51,17 @@ Bluetooth state:
 - The ESP32-C6 has been flashed with the controller-only HCI UART firmware from
   `hardware_tests/fruitjam_esp32c6_hci/`.
 - The RP2350 NimBLE host uses the Fruit Jam UART1 H4 transport on GPIO8/GPIO9.
-- The current failure mode is an HCI startup timeout before NimBLE reaches
-  advertising, so the Core Devices phone app will not see the watch yet.
-- The latest RP2350 build preserves UART overrun-tagged bytes and exposes HCI
-  command/event counters through the CDC `esp` and `bt` commands so the next
-  step can identify exactly which command/event pair is being lost.
+- RP2350 NimBLE auto-start is disabled for this target so PebbleOS can register
+  services before the host starts. Leaving NimBLE's default auto-start enabled
+  made the host synchronize before Pebble's Bluetooth service was ready.
+- The ESP HCI UART RX path is interrupt-backed, which prevents the controller's
+  larger startup responses from overflowing the RP2350 UART FIFO.
+- The CDC `esp` command exposes HCI command/event history and UART RX ring
+  counters. The CDC `bt` command exposes Bluetooth control state, driver start
+  stage, advertising counters, GAP events, and advertising payload prefixes.
+- Latest hardware evidence: HCI startup completed with no H4 parse errors,
+  `bt driver enter=1 done=1 ok=1`, `adv active=1`, advertising interval
+  `20-20` ms, and local name `Pebble A35A`.
 - Stock WiFiNINA/AirLift firmware cannot be kept for this NimBLE path because
   it is a high-level SPI coprocessor firmware, not a raw BLE HCI controller.
 
@@ -105,7 +114,7 @@ Last successful build:
 - Firmware + system resources UF2:
   `build/src/fw/tintin_fw_with_resources.uf2`
 - Resources: `build/system_resources.pbpack`
-- Firmware size: 762003 / 16777216 bytes
+- Firmware size: 763731 / 16777216 bytes
 - Resource size: 741474 / 2097152 bytes
 - UF2 SHA-256: generated for the tagged GitHub release asset. The firmware
   includes git-version metadata, so local rebuilds from different commits or
@@ -134,6 +143,7 @@ Latest local validation:
 - `git diff --check`
 - `./pbl build`
 - Picotool UF2 conversion plus `tools/fruitjam_pack_uf2.py`
+- `shasum -a 256 build/src/fw/tintin_fw_with_resources.uf2`
 - `picotool info -a build/src/fw/tintin_fw_with_resources.uf2`
 - Python binary resource-payload check
 - `python -m py_compile tools/fruitjam_pack_uf2.py`
@@ -142,8 +152,9 @@ Latest local validation:
   `hardware_tests/fruitjam_esp32c6_hci/`
 - `./pbl test -M test_flash_region --no_images`
 - Hardware flash to Fruit Jam RP2350 via `/Volumes/RP2350`
+- CDC debug state capture with `progress`, `esp`, `bt`, `tasks`, and `reason`
 - CDC frame capture:
-  `tools/fruitjam_cdc_frame.py -p /dev/cu.usbmodemFJRP23501 -o /tmp/fruitjam_fixed_power_final.png`
+  `tools/fruitjam_cdc_frame.py -p /dev/cu.usbmodemFJRP23501 -o /tmp/fruitjam_ble_advertising.png`
 
 Hardware test notes:
 
@@ -202,8 +213,8 @@ Hardware test notes:
   of `third_party/nimble/transport/hci_stub.c`. The helper resets the ESP into
   Bluetooth mode with ESP_CS low, ESP GPIO0/RTS high for normal boot then low
   for ready-to-receive, ESP_BUSY as CTS, and UART1 on GPIO8 TX / GPIO9 RX at
-  115200 baud. The transport now sees HCI traffic on hardware, but NimBLE still
-  times out during controller startup before advertising begins.
+  115200 baud. The transport now sees clean startup HCI traffic and the Pebble
+  Bluetooth service reaches advertising on hardware.
 - RP2350 now links a real PL011 debug UART driver instead of the UART stub.
   `DBG_UART` is UART0 on Fruit Jam GPIO44 TX / GPIO45 RX at Pebble's default
   230400 baud after `dbgserial_init()`. This avoids the ESP32-C6 HCI UART1 pins
@@ -304,6 +315,11 @@ Hardware test notes:
   last event status/opcode, and a short raw event prefix in the CDC `esp`
   output. It also keeps UART overrun-tagged bytes instead of dropping the byte
   outright. The release UF2 checksum is published in the GitHub release notes.
+- The latest local build fixes Fruit Jam RP2350 NimBLE startup by disabling
+  NimBLE host auto-start for the RP2350 target, adding an interrupt-backed ESP
+  HCI UART RX ring, and exposing Bluetooth control/driver-stage diagnostics via
+  CDC. It was flashed with USB `picotool load -v -x` on 2026-06-14, verified by
+  Picotool, rebooted into PebbleOS, and advertised as `Pebble A35A`.
 
 ## Current Scaffold
 
@@ -371,6 +387,9 @@ The Fruit Jam target includes:
   UART1, and mirrors CDC baud-rate changes onto UART1 for esptool.
 - NimBLE H4 transport for RP2350 at
   `third_party/nimble/transport/hci_fruitjam_rp2350.c`.
+- RP2350 NimBLE build override in `third_party/nimble/wscript_build` disables
+  `BLE_HS_AUTO_START` so the host starts only after Pebble's Bluetooth service
+  has registered GAP, GATT, DIS, pairing, and BAS services.
 - Fruit Jam currently expects the ESP32-C6 controller-only HCI firmware for
   PebbleOS Bluetooth. Stock WiFiNINA/AirLift firmware is a high-level
   coprocessor protocol and is not the raw HCI controller interface that the
@@ -398,15 +417,13 @@ Remaining work before it is useful on hardware:
   port yet; it is packaged as a valid RP2350 UF2 with system resources and
   reaches Pebble UI on hardware, but it still boots with several stubbed
   hardware drivers.
-- Standalone LCD, early PebbleOS LCD output, and launcher handoff are
-  hardware-verified. Longer UI sessions still need broader testing.
+- Standalone LCD, early PebbleOS LCD output, launcher handoff, USB CDC debug,
+  frame capture, BOOTSEL recovery, and BLE advertising are hardware-verified.
+  Longer UI sessions, pairing, and end-to-end phone services still need broader
+  testing.
 - The combined UF2 programming path has been USB/picotool-verified through the
-  Bluetooth guardrail build, and the latest diagnostic build was accepted by the
-  RP2350 UF2 volume. Hardware observation is still needed to capture the first
-  `ERR ...` label or last numbered stage in the reset loop, whether PebbleOS
-  finds valid system resources, whether it moves past the early splash into the
-  compositor path, and whether the Up+Select Down chord and all-buttons BOOTSEL
-  escape behave correctly.
+  Bluetooth advertising build. Picotool verified both firmware and resource
+  ranges and rebooted the board into the application.
 - The button driver is present, but has not been tested under PebbleOS on
   hardware yet. It polls GPIOs, debounces in a FreeRTOS task, maps Up+Select to
   Pebble Down with a short chord grace window, and includes the all-buttons
@@ -414,10 +431,10 @@ Remaining work before it is useful on hardware:
 - Hardware-verify the experimental SPI1 LCD path if it is needed for refresh
   speed. The stable Fruit Jam build leaves SPI1 disabled for now.
 - Hardware-verify debug UART output on GPIO44 TX / GPIO45 RX at 230400 baud.
-- Continue RP2350-side NimBLE startup work against the flashed ESP32-C6 HCI
-  image. The current issue is still before advertising: NimBLE reports an HCI
-  startup timeout, so the phone app will not discover the watch until the HCI
-  command/event path is fixed.
+- Continue RP2350-side NimBLE work against the flashed ESP32-C6 HCI image. The
+  current milestone has moved past startup into advertising; the next unknowns
+  are iPhone pairing, bonding persistence, GAP/GATT service behavior, and
+  Pebble protocol traffic after connection.
 - The stock WiFiNINA/AirLift firmware cannot be kept for the current
   RP2350-side NimBLE host path because it speaks the high-level AirLift protocol
   over SPI, not raw Bluetooth HCI over UART. Restoring WiFiNINA later requires

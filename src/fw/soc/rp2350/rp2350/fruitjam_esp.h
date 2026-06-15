@@ -8,6 +8,20 @@
 #include <stdint.h>
 
 #define FRUITJAM_ESP_HCI_DEBUG_EVT_PREFIX_SIZE 8U
+#define FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE 8U
+
+typedef struct FruitJamEspHciDebugCmdEntry {
+  uint16_t opcode;
+  uint8_t length;
+  uint8_t ok;
+} FruitJamEspHciDebugCmdEntry;
+
+typedef struct FruitJamEspHciDebugEvtEntry {
+  uint16_t opcode;
+  uint8_t code;
+  uint8_t length;
+  uint8_t status;
+} FruitJamEspHciDebugEvtEntry;
 
 typedef struct FruitJamEspHciDebugSnapshot {
   uint32_t init_count;
@@ -16,6 +30,8 @@ typedef struct FruitJamEspHciDebugSnapshot {
   uint32_t drain_bytes;
   uint32_t rx_bytes;
   uint32_t rx_error_count;
+  uint32_t rx_irq_count;
+  uint32_t rx_ring_drop_count;
   uint32_t tx_bytes;
   uint32_t tx_timeout_count;
   uint32_t h4_discard_count;
@@ -28,6 +44,10 @@ typedef struct FruitJamEspHciDebugSnapshot {
   uint32_t hci_evt_cmd_complete_count;
   uint32_t hci_evt_cmd_status_count;
   uint32_t hci_evt_other_count;
+  uint32_t hci_cmd_seq;
+  uint32_t hci_evt_seq;
+  FruitJamEspHciDebugCmdEntry hci_cmd_history[FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE];
+  FruitJamEspHciDebugEvtEntry hci_evt_history[FRUITJAM_ESP_HCI_DEBUG_SEQ_SIZE];
   uint16_t last_hci_cmd_opcode;
   uint16_t last_hci_evt_opcode;
   uint8_t last_hci_cmd_length;
@@ -40,6 +60,8 @@ typedef struct FruitJamEspHciDebugSnapshot {
   uint8_t last_rx_error;
   uint8_t last_h4_discard_byte;
   uint8_t last_h4_type;
+  uint16_t rx_ring_depth;
+  uint16_t rx_ring_high_watermark;
   bool cts_ready;
 } FruitJamEspHciDebugSnapshot;
 
