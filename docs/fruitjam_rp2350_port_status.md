@@ -32,6 +32,9 @@ Current hardware-verified behavior:
   `tools/fruitjam_cdc_frame.py -p /dev/cu.usbmodemFJRP23501 -o /tmp/fruitjam_latest.png`.
 - The CDC shell can be queried without an interactive terminal, for example:
   `tools/fruitjam_cdc_command.py -p /dev/cu.usbmodemFJRP23501 buttons`.
+- The CDC `buttons` command has been hardware-verified on the button-diagnostic
+  build. With no physical buttons pressed it reported raw, debounced, emitted,
+  and live states all idle (`0000`) while Bluetooth advertising remained active.
 - Bluetooth reaches NimBLE host start and BLE advertising through the Fruit Jam
   ESP32-C6 controller-only HCI UART firmware. A hardware CDC snapshot showed
   `bt driver ... ok=1`, `adv active=1`, and local name `Pebble A35A`.
@@ -322,6 +325,17 @@ Hardware test notes:
   HCI UART RX ring, and exposing Bluetooth control/driver-stage diagnostics via
   CDC. It was flashed with USB `picotool load -v -x` on 2026-06-14, verified by
   Picotool, rebooted into PebbleOS, and advertised as `Pebble A35A`.
+- The latest local build after adding the CDC `buttons` command and
+  `tools/fruitjam_cdc_command.py` was flashed with USB `picotool load -v -x` on
+  2026-06-14. Picotool verified the programmed flash ranges and rebooted the
+  board into PebbleOS. The debug CDC port came back as
+  `/dev/cu.usbmodemFJRP23501`; `help` listed `buttons`; `progress` reported
+  `17 BT OK`; `buttons` reported
+  `raw=0000 debounced=0000 emitted=0000 live=0000`; `bt` still reported
+  `adv active=1` and local name `Pebble A35A`. The LCD frame capture at
+  `/tmp/fruitjam_buttons_build.png` showed the launcher/settings list. Its
+  combined UF2 hash is
+  `edfc28c4ccdb3b3b147fed49e03dd352bc3ce3fac4752fe6c38bbd4fe2c6bfa7`.
 
 ## Current Scaffold
 
@@ -430,12 +444,11 @@ Remaining work before it is useful on hardware:
 - The combined UF2 programming path has been USB/picotool-verified through the
   Bluetooth advertising build. Picotool verified both firmware and resource
   ranges and rebooted the board into the application.
-- The button driver is present, but has not been tested under PebbleOS on
-  hardware yet. It polls GPIOs, debounces in a FreeRTOS task, maps Up+Select to
-  Pebble Down with a short chord grace window, and includes the all-buttons
-  BOOTSEL escape. The CDC `buttons` command now exposes enough raw/debounced/
-  emitted state to verify the mapping without relying only on visible UI
-  movement. Use
+- The button driver is present and the CDC `buttons` command has been
+  hardware-verified at idle under PebbleOS. Physical button presses and the
+  Up+Select synthetic Down chord still need hands-on verification. The driver
+  polls GPIOs, debounces in a FreeRTOS task, maps Up+Select to Pebble Down with
+  a short chord grace window, and includes the all-buttons BOOTSEL escape. Use
   `tools/fruitjam_cdc_command.py -p /dev/cu.usbmodemFJRP23501 buttons` while
   pressing Back, Up, Select, and Up+Select to verify the physical and synthetic
   states.
