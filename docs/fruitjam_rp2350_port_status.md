@@ -30,6 +30,8 @@ Current hardware-verified behavior:
 - The CDC `frame` command captures the last 144x168 1bpp LCD framebuffer sent by
   the display driver; it can be converted with
   `tools/fruitjam_cdc_frame.py -p /dev/cu.usbmodemFJRP23501 -o /tmp/fruitjam_latest.png`.
+- The CDC shell can be queried without an interactive terminal, for example:
+  `tools/fruitjam_cdc_command.py -p /dev/cu.usbmodemFJRP23501 buttons`.
 - Bluetooth reaches NimBLE host start and BLE advertising through the Fruit Jam
   ESP32-C6 controller-only HCI UART firmware. A hardware CDC snapshot showed
   `bt driver ... ok=1`, `adv active=1`, and local name `Pebble A35A`.
@@ -433,7 +435,10 @@ Remaining work before it is useful on hardware:
   Pebble Down with a short chord grace window, and includes the all-buttons
   BOOTSEL escape. The CDC `buttons` command now exposes enough raw/debounced/
   emitted state to verify the mapping without relying only on visible UI
-  movement.
+  movement. Use
+  `tools/fruitjam_cdc_command.py -p /dev/cu.usbmodemFJRP23501 buttons` while
+  pressing Back, Up, Select, and Up+Select to verify the physical and synthetic
+  states.
 - Hardware-verify the experimental SPI1 LCD path if it is needed for refresh
   speed. The stable Fruit Jam build leaves SPI1 disabled for now.
 - Hardware-verify debug UART output on GPIO44 TX / GPIO45 RX at 230400 baud.
