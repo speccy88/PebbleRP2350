@@ -38,6 +38,12 @@ if bld.env.CONFIG_QEMU and bld.env.CONFIG_CORTEX_M33:
         'FREERTOS_LAST_MPU_REGION=7',
     ]
 
+if bld.env.CONFIG_SOC_RP2350 and bld.env.CONFIG_CORTEX_M33:
+    freertos_defines += [
+        'FREERTOS_FIRST_MPU_REGION=4',
+        'FREERTOS_LAST_MPU_REGION=7',
+    ]
+
 bld(export_includes=freertos_includes,
     export_defines=freertos_defines,
     use=['cmsis_core'],

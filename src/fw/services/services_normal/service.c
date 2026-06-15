@@ -46,6 +46,10 @@
 
 #include "util/size.h"
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
+#endif
+
 // Minimum valid time: January 1, 2020 00:00:00 UTC (timestamp: 1577836800)
 // This represents the minimum time we consider valid for activity initialization
 #define MIN_VALID_TIME_TIMESTAMP 1577836800
@@ -81,7 +85,13 @@ static bool prv_is_time_valid_for_activity_init(void) {
 }
 
 void services_normal_early_init(void) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_boot_progress_mark(FruitJamBootProgressStagePfsStart);
+#endif
   pfs_init(true);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_boot_progress_mark(FruitJamBootProgressStagePfsDone);
+#endif
 }
 
 void services_normal_init(void) {

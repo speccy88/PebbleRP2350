@@ -29,6 +29,17 @@
 #include "util/legacy_checksum.h"
 #include "util/math.h"
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
+#define FRUITJAM_PFS_MARK(label) \
+  fruitjam_boot_progress_mark_label(FruitJamBootProgressStagePfsStart, (label))
+#define FRUITJAM_PFS_MARK_DONE(label) \
+  fruitjam_boot_progress_mark_label(FruitJamBootProgressStagePfsDone, (label))
+#else
+#define FRUITJAM_PFS_MARK(label) ((void)0)
+#define FRUITJAM_PFS_MARK_DONE(label) ((void)0)
+#endif
+
 PBL_LOG_MODULE_DEFINE(service_filesystem, CONFIG_SERVICE_FILESYSTEM_LOG_LEVEL);
 
 static PebbleRecursiveMutex *s_pfs_mutex = NULL;
@@ -259,7 +270,9 @@ static void prv_invalidate_page_flags_cache(uint32_t offset, uint32_t size) {
 }
 
 static void prv_invalidate_page_flags_cache_all(void) {
+  FRUITJAM_PFS_MARK("CACHE READ");
   prv_invalidate_page_flags_cache(0, s_pfs_page_count * PFS_PAGE_SIZE);
+  FRUITJAM_PFS_MARK("CACHE OK");
 }
 
 static void prv_flash_write(const void *buffer, uint32_t size, uint32_t offset) {
@@ -323,6 +336,7 @@ static void prv_build_page_flags_cache(void) {
   // no caching for unit tests
   return;
 #endif
+  FRUITJAM_PFS_MARK("CACHE BUILD");
 
   // if it already exists, free it first
   if (s_pfs_page_flags_cache) {
@@ -332,11 +346,13 @@ static void prv_build_page_flags_cache(void) {
 
   // if there are no pages in PFS, we don't need a cache
   if (s_pfs_page_count == 0) {
+    FRUITJAM_PFS_MARK("CACHE EMPTY");
     return;
   }
 
   // allocate the new cache
   s_pfs_page_flags_cache = kernel_malloc_check(s_pfs_page_count * sizeof(*s_pfs_page_flags_cache));
+  FRUITJAM_PFS_MARK("CACHE MALLOC");
 
   // read and set each of the page flags into the cache
   prv_invalidate_page_flags_cache_all();
@@ -384,6 +400,8 @@ static uint32_t compute_file_header_crc(FileHeader *hdr) {
 // the start page is written to, the end page is not written to.
 static void prv_write_erased_header_on_page_range(uint16_t start, uint16_t end,
     int erase_count) {
+  FRUITJAM_PFS_MARK("PFS HDR");
+
   // create a header representing an erase header
   PageHeader pg_hdr;
   memset(&pg_hdr, 0xff, sizeof(pg_hdr));
@@ -394,6 +412,13 @@ static void prv_write_erased_header_on_page_range(uint16_t start, uint16_t end,
   // write that header to each region in pfs
   uint8_t erased_header_size = offsetof(PageHeader, erase_count) + sizeof(pg_hdr.erase_count);
   for (uint16_t i = start; i < end; i++) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    if (((i - start) % 64U) == 0U) {
+      char label[16];
+      snprintf(label, sizeof(label), "HDR %04u", (unsigned)i);
+      FRUITJAM_PFS_MARK(label);
+    }
+#endif
     prv_flash_write((uint8_t*)&pg_hdr, erased_header_size, prv_page_to_flash_offset(i));
   }
 }
@@ -536,7 +561,15 @@ static int s_test_last_page_written_override = -1;
 #endif
 
 static void update_last_written_page(void) {
+  FRUITJAM_PFS_MARK("LAST SCAN");
   for (uint16_t pg = 0; pg < s_pfs_page_count; pg++) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    if ((pg % 128U) == 0U) {
+      char label[16];
+      snprintf(label, sizeof(label), "LAST %04u", (unsigned)pg);
+      FRUITJAM_PFS_MARK(label);
+    }
+#endif
     PageHeader hdr;
     prv_flash_read((uint8_t *)&hdr.last_written, sizeof(hdr.last_written),
         prv_page_to_flash_offset(pg) + offsetof(PageHeader, last_written));
@@ -550,6 +583,7 @@ static void update_last_written_page(void) {
   // should only happen after a filesystem format
   PBL_LOG_WRN("Couldn't resolve last written pg");
   s_last_page_written = s_pfs_page_count - 1;
+  FRUITJAM_PFS_MARK("LAST END");
 #if UNITTEST
   if (s_test_last_page_written_override != -1) {
     s_last_page_written = s_test_last_page_written_override;
@@ -755,6 +789,8 @@ static status_t find_free_page(uint16_t *free_page, bool use_gc_allocator,
 //!    find / create the free space. If 0, then there is no timeout
 static void pfs_prepare_for_file_creation(uint32_t file_size,
                                           uint32_t max_elapsed_ticks) {
+  FRUITJAM_PFS_MARK("PFS PREP");
+
   uint16_t pages_to_find = (file_size + PFS_PAGE_SIZE) / PFS_PAGE_SIZE;
   uint16_t free_page = 0;
 
@@ -771,6 +807,14 @@ static void pfs_prepare_for_file_creation(uint32_t file_size,
       psleep(2);
     }
     pages_to_find--;
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    if ((pages_to_find % 32U) == 0U) {
+      char label[16];
+      snprintf(label, sizeof(label), "PREP %03u", (unsigned)pages_to_find);
+      FRUITJAM_PFS_MARK(label);
+    }
+#endif
 
     uint32_t elapsed_ticks = rtc_get_ticks() - start_ticks;
     if (max_elapsed_ticks != 0 && (elapsed_ticks > max_elapsed_ticks)) {
@@ -810,6 +854,12 @@ static status_t get_next_page(uint16_t curr_page, uint16_t *next_page) {
 }
 
 static status_t unlink_flash_file(uint16_t page) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  char label[16];
+  snprintf(label, sizeof(label), "UNL %04u", (unsigned)page);
+  FRUITJAM_PFS_MARK(label);
+#endif
+
   uint16_t first_page = page;
   if (page > s_pfs_page_count) { // should never happen
     return (E_INTERNAL);
@@ -822,6 +872,12 @@ static status_t unlink_flash_file(uint16_t page) {
   int rv = S_SUCCESS;
   int unlink_count = 0;
   do {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    if ((unlink_count % 32) == 0) {
+      snprintf(label, sizeof(label), "ULP %04u", (unsigned)page);
+      FRUITJAM_PFS_MARK(label);
+    }
+#endif
     if ((page > s_pfs_page_count) || (unlink_count > s_pfs_page_count)) {
       rv = E_INTERNAL; // should never happen
       break;
@@ -836,6 +892,7 @@ static status_t unlink_flash_file(uint16_t page) {
   // deletion we check for this during reboot to clean up a partial delete
   update_curr_state(first_page, DELETE_STATE_OFFSET, DELETE_STATE_DONE);
 
+  FRUITJAM_PFS_MARK("UNL DONE");
   return (rv);
 }
 
@@ -1202,19 +1259,24 @@ uint32_t pfs_get_size(void) {
 }
 
 void pfs_set_size(uint32_t new_size, bool new_region_erased) {
+  FRUITJAM_PFS_MARK("SIZE SET");
   uint32_t prev_size = s_pfs_size;
   s_pfs_size = new_size;
   s_pfs_page_count = new_size / PFS_PAGE_SIZE;
 
   // re-build the flags cache
+  FRUITJAM_PFS_MARK("SIZE CACHE");
   prv_build_page_flags_cache();
 
   if (new_region_erased) {
+    FRUITJAM_PFS_MARK("SIZE HDR");
     prv_write_erased_header_on_page_range((prev_size/PFS_PAGE_SIZE),
         (new_size/PFS_PAGE_SIZE), 1);
   }
 
+  FRUITJAM_PFS_MARK("SIZE LAST");
   update_last_written_page();
+  FRUITJAM_PFS_MARK("SIZE DONE");
 }
 
 bool pfs_active_in_region(uint32_t start_address, uint32_t ending_address) {
@@ -1267,10 +1329,23 @@ bool pfs_active(void) {
 void pfs_reboot_cleanup(void) {
   static uint16_t curr_pg = 0;
 
+  FRUITJAM_PFS_MARK("CLEAN START");
   for (; curr_pg < s_pfs_page_count; curr_pg++) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    if ((curr_pg % 128U) == 0U) {
+      char label[16];
+      snprintf(label, sizeof(label), "CLN %04u", (unsigned)curr_pg);
+      FRUITJAM_PFS_MARK(label);
+    }
+#endif
     uint8_t page_flags = prv_get_page_flags(curr_pg);
 
     if (IS_PAGE_TYPE(page_flags, PAGE_FLAG_START_PAGE)) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+      char label[16];
+      snprintf(label, sizeof(label), "CST %04u", (unsigned)curr_pg);
+      FRUITJAM_PFS_MARK(label);
+#endif
       if (!is_create_complete(curr_pg)) { // make sure file creation completed
         PBL_LOG_WRN("File at %d creation did not complete ",
             curr_pg);
@@ -1281,12 +1356,19 @@ void pfs_reboot_cleanup(void) {
       }
     } else if (page_type_bits_set(page_flags, DELETED_START_PAGE_MASK) &&
         !is_delete_complete(curr_pg)) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+      char label[16];
+      snprintf(label, sizeof(label), "CDL %04u", (unsigned)curr_pg);
+      FRUITJAM_PFS_MARK(label);
+#endif
       PBL_LOG_WRN("Delete of %d did not complete", curr_pg);
       unlink_flash_file(curr_pg);
     }
   }
 
+  FRUITJAM_PFS_MARK("CLEAN LAST");
   update_last_written_page();
+  FRUITJAM_PFS_MARK("CLEAN DONE");
 }
 
 static void prv_handle_sector_erase(uint16_t start_page, bool update_erase_count) {
@@ -2067,18 +2149,24 @@ status_t pfs_init(bool run_filesystem_check) {
   if (s_pfs_mutex == NULL) {
     s_pfs_mutex = mutex_create_recursive();
   }
+  FRUITJAM_PFS_MARK("PFS MUTEX");
 
   for (int fd = FD_INDEX_OFFSET; fd < FD_INDEX_OFFSET+MAX_FD_HANDLES; fd++) {
     PFS_FD(fd) = (FileDesc) { .fd_status = FD_STATUS_FREE };
   }
 
+  FRUITJAM_PFS_MARK("PFS FTL");
   ftl_populate_region_list();
+  FRUITJAM_PFS_MARK("PFS FTL OK");
 
   if (run_filesystem_check) {
+    FRUITJAM_PFS_MARK("PFS ACTIVE");
     if (!pfs_active()) {
       // either we have downgraded or there is no data on the flash
       PBL_LOG_INFO("PFS not active ... formatting");
+      FRUITJAM_PFS_MARK("PFS FORMAT");
       pfs_format(true /* write erase headers */);
+      FRUITJAM_PFS_MARK("PFS FMT OK");
     }
   }
 
@@ -2086,21 +2174,26 @@ status_t pfs_init(bool run_filesystem_check) {
   // think a region is free when in reality we just rebooted in the middle of it
   // being re-written
   int fd;
+  FRUITJAM_PFS_MARK("PFS GC OPEN");
   if ((fd = pfs_open_gc_file(0, false)) >= S_SUCCESS) {
     // we rebooted while we were in the middle of a garbage collection
     PBL_LOG_INFO("Recovering flash region from GC file");
+    FRUITJAM_PFS_MARK("PFS GC REC");
     recover_region_from_file(fd);
   }
 
   // find a free region
+  FRUITJAM_PFS_MARK("PFS GC RSV");
   if (!prv_update_gc_reserved_region()) {
     PBL_LOG_ERR("No free flash erase units!");
     // Note: It should not be possible for this to happen since start of day no
     // files will be written on then flash. We could also try to force apps to
     // be flushed out of the FS in an attempt to free up space since they are
     // only being cached on the FS
+    FRUITJAM_PFS_MARK("PFS GC FMT");
     pfs_format(true);
   }
+  FRUITJAM_PFS_MARK("PFS GC OK");
 
   // get us off to a good start by ensuring there is some pre-erased space on
   // the filesystem. We do a lot of initialization from different threads early
@@ -2111,11 +2204,13 @@ status_t pfs_init(bool run_filesystem_check) {
 
   pfs_prepare_for_file_creation(bytes_to_free, 15 * RTC_TICKS_HZ);
 
+  FRUITJAM_PFS_MARK_DONE("PFS DONE");
   return (S_SUCCESS);
 }
 
 void pfs_format(bool write_erase_headers) {
   PBL_LOG_INFO("FS-Format Start");
+  FRUITJAM_PFS_MARK("FMT LOCK");
   mutex_lock_recursive(s_pfs_mutex);
 
   for (int i = FD_INDEX_OFFSET; i < FD_INDEX_OFFSET+PFS_FD_SET_SIZE; i++) {
@@ -2123,14 +2218,18 @@ void pfs_format(bool write_erase_headers) {
   }
 
   // clear out all pages
+  FRUITJAM_PFS_MARK("FMT ERASE");
   filesystem_regions_erase_all();
+  FRUITJAM_PFS_MARK("FMT ERASE OK");
   prv_invalidate_page_flags_cache_all();
 
   if (write_erase_headers) {
+    FRUITJAM_PFS_MARK("FMT HDR");
     prv_write_erased_header_on_page_range(0, s_pfs_page_count, 1);
   }
 
   mutex_unlock_recursive(s_pfs_mutex);
+  FRUITJAM_PFS_MARK("FMT DONE");
   PBL_LOG_INFO("FS-Format Done");
 }
 

@@ -12,6 +12,8 @@ elif bld.env.CONFIG_UART_NRF5:
 elif bld.env.CONFIG_UART_SF32LB:
     use.append('hal_sifli')
     sources.append('sf32lb.c')
+elif bld.env.CONFIG_UART_RP2350:
+    sources.append('rp2350.c')
 
 bld.objects(
     name='driver_uart',

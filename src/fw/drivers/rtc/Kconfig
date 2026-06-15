@@ -20,6 +20,11 @@ config RTC_SF32LB
     help
       Support for the SiFli SF32LB RTC.
 
+config RTC_RP2350
+    bool "Raspberry Pi RP2350 RTC"
+    help
+      Support for the RP2350 timer-backed RTC.
+
 config RTC_QEMU
     bool "QEMU RTC"
     help

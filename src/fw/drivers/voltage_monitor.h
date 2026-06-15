@@ -19,7 +19,7 @@ typedef const struct VoltageMonitorDevice {
   const nrf_saadc_input_t input;
 } VoltageMonitorDevice;
 
-#elif defined(CONFIG_SOC_SF32LB52) || defined(CONFIG_QEMU)
+#elif defined(CONFIG_SOC_SF32LB52) || defined(CONFIG_QEMU) || defined(CONFIG_SOC_RP2350)
 
 typedef const struct VoltageMonitorDevice {
 } VoltageMonitorDevice;

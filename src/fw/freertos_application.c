@@ -45,7 +45,7 @@ static uint32_t s_ticks_corrected = 0;
 static const RtcTicks EARLY_WAKEUP_TICKS = 2;
 //! Stop mode until this number of ticks before the next scheduled task
 static const RtcTicks MIN_STOP_TICKS = 5;
-#elif defined(CONFIG_QEMU)
+#elif defined(CONFIG_QEMU) || defined(CONFIG_SOC_RP2350)
 static const RtcTicks EARLY_WAKEUP_TICKS = 2;
 static const RtcTicks MIN_STOP_TICKS = 5;
 #endif

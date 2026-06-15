@@ -14,6 +14,10 @@
 #include <system/passert.h>
 #include <util/math.h>
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_bt_debug.h"
+#endif
+
 #include "nimble_type_conversions.h"
 
 PBL_LOG_MODULE_DECLARE(bt, CONFIG_BT_LOG_LEVEL);
@@ -41,6 +45,9 @@ void bt_driver_advert_advertising_disable(void) {
   }
 
   rc = ble_gap_adv_stop();
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_adv_stop();
+#endif
   PBL_ASSERT(rc == 0, "Failed to stop advertising (0x%04x)", (uint16_t)rc);
 }
 
@@ -48,17 +55,24 @@ bool bt_driver_advert_client_get_tx_power(int8_t *tx_power) { return false; }
 
 bool bt_driver_advert_set_advertising_data(const BLEAdData *ad_data) {
   int rc;
+  int scan_rsp_rc = 0;
 
   rc = ble_gap_adv_set_data((uint8_t *)&ad_data->data, ad_data->ad_data_length);
   if (rc != 0) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_adv_data(ad_data, rc, scan_rsp_rc);
+#endif
     PBL_LOG_ERR("Failed to set advertising data (0x%04x)", (uint16_t)rc);
     return false;
   }
 
-  rc = ble_gap_adv_rsp_set_data((uint8_t *)&ad_data->data[ad_data->ad_data_length],
-                                ad_data->scan_resp_data_length);
-  if (rc != 0) {
-    PBL_LOG_ERR("Failed to set scan response data (0x%04x)", (uint16_t)rc);
+  scan_rsp_rc = ble_gap_adv_rsp_set_data((uint8_t *)&ad_data->data[ad_data->ad_data_length],
+                                         ad_data->scan_resp_data_length);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_adv_data(ad_data, rc, scan_rsp_rc);
+#endif
+  if (scan_rsp_rc != 0) {
+    PBL_LOG_ERR("Failed to set scan response data (0x%04x)", (uint16_t)scan_rsp_rc);
     return false;
   }
 
@@ -316,6 +330,34 @@ static void prv_handle_phy_update_event(struct ble_gap_event *event) {
 }
 
 static int prv_handle_gap_event(struct ble_gap_event *event, void *arg) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  int status = 0;
+  int reason = 0;
+  switch (event->type) {
+    case BLE_GAP_EVENT_CONNECT:
+      status = event->connect.status;
+      break;
+    case BLE_GAP_EVENT_DISCONNECT:
+      reason = event->disconnect.reason;
+      break;
+    case BLE_GAP_EVENT_ENC_CHANGE:
+      status = event->enc_change.status;
+      break;
+    case BLE_GAP_EVENT_CONN_UPDATE:
+      status = event->conn_update.status;
+      break;
+    case BLE_GAP_EVENT_PAIRING_COMPLETE:
+      status = event->pairing_complete.status;
+      break;
+    case BLE_GAP_EVENT_PHY_UPDATE_COMPLETE:
+      status = event->phy_updated.status;
+      break;
+    default:
+      break;
+  }
+  fruitjam_bt_debug_record_gap_event(event->type, status, reason);
+#endif
+
   switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
       PBL_LOG_DBG("BLE_GAP_EVENT_CONNECT");
@@ -382,6 +424,7 @@ static int prv_handle_gap_event(struct ble_gap_event *event, void *arg) {
 
 bool bt_driver_advert_advertising_enable(uint32_t min_interval_ms, uint32_t max_interval_ms) {
   int rc;
+  int addr_rc;
   uint8_t own_addr_type;
   struct ble_gap_adv_params advp = {
       .conn_mode = BLE_GAP_CONN_MODE_UND,
@@ -390,13 +433,19 @@ bool bt_driver_advert_advertising_enable(uint32_t min_interval_ms, uint32_t max_
       .itvl_max = BLE_GAP_ADV_ITVL_MS(max_interval_ms),
   };
 
-  rc = ble_hs_id_infer_auto(0, &own_addr_type);
-  if (rc != 0) {
-    PBL_LOG_ERR("Failed to infer own address type (%d)", rc);
+  addr_rc = ble_hs_id_infer_auto(0, &own_addr_type);
+  if (addr_rc != 0) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_adv_start(min_interval_ms, max_interval_ms, addr_rc, 0xffU, 0);
+#endif
+    PBL_LOG_ERR("Failed to infer own address type (%d)", addr_rc);
     return false;
   }
 
   rc = ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &advp, prv_handle_gap_event, NULL);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_adv_start(min_interval_ms, max_interval_ms, addr_rc, own_addr_type, rc);
+#endif
   if (rc != 0) {
     PBL_LOG_ERR("Failed to start advertising (0x%04x)", (uint16_t)rc);
     return false;

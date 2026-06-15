@@ -4,6 +4,8 @@ if bld.env.CONFIG_BOARD_FAMILY_ASTERIX:
     sources.append(bld.path.make_node("startup_cortex_m.c"))
 elif bld.env.CONFIG_BOARD_FAMILY_OBELIX or bld.env.CONFIG_BOARD_FAMILY_GETAFIX:
     sources.append(bld.path.make_node("startup_sf32lb52.c"))
+elif bld.env.CONFIG_SOC_RP2350:
+    sources.append(bld.path.make_node("startup_qemu.c"))
 elif bld.env.CONFIG_QEMU:
     sources.append(bld.path.make_node("startup_qemu.c"))
 else:

@@ -14,6 +14,9 @@ extern uint8_t __data_end[];
 extern uint8_t __bss_start[];
 extern uint8_t __bss_end[];
 extern uint8_t __isr_stack_start__[];
+extern uint8_t __ramfunc_load_start[] __attribute__((weak));
+extern uint8_t __ramfunc_start[] __attribute__((weak));
+extern uint8_t __ramfunc_end[] __attribute__((weak));
 
 extern int main(void);
 
@@ -21,6 +24,12 @@ NORETURN prv_startup(void) {
   // Copy data section from flash to RAM
   for (int i = 0; i < (__data_end - __data_start); i++) {
     __data_start[i] = __data_load_start[i];
+  }
+
+  if (__ramfunc_start && __ramfunc_end) {
+    for (int i = 0; i < (__ramfunc_end - __ramfunc_start); i++) {
+      __ramfunc_start[i] = __ramfunc_load_start[i];
+    }
   }
 
   // Clear the bss section

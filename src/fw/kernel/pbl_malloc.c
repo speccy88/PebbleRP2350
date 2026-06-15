@@ -12,6 +12,7 @@
 #include "system/passert.h"
 #include "util/heap.h"
 
+#include <stdbool.h>
 #include <string.h>
 
 Heap *task_heap_get_for_current_task(void) {
@@ -21,6 +22,11 @@ Heap *task_heap_get_for_current_task(void) {
     return worker_state_get_heap();
   }
   return kernel_heap_get();
+}
+
+static bool prv_current_task_uses_kernel_heap(void) {
+  const PebbleTask task = pebble_task_get_current();
+  return task != PebbleTask_App && task != PebbleTask_Worker;
 }
 
 static char* prv_strdup(Heap *heap, const char* s, uintptr_t lr) {
@@ -35,6 +41,10 @@ static char* prv_strdup(Heap *heap, const char* s, uintptr_t lr) {
 ///////////////////////////////////////////////////////////
 #if defined(CONFIG_MALLOC_INSTRUMENTATION)
 void *task_malloc_with_pc(size_t bytes, uintptr_t client_pc) {
+  if (prv_current_task_uses_kernel_heap()) {
+    return kernel_heap_malloc(bytes, client_pc);
+  }
+
   return heap_malloc(task_heap_get_for_current_task(), bytes, client_pc);
 }
 #endif
@@ -42,6 +52,10 @@ void *task_malloc_with_pc(size_t bytes, uintptr_t client_pc) {
 void *task_malloc(size_t bytes) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
+
+  if (prv_current_task_uses_kernel_heap()) {
+    return kernel_heap_malloc(bytes, saved_lr);
+  }
 
   return heap_malloc(task_heap_get_for_current_task(), bytes, saved_lr);
 }
@@ -51,7 +65,13 @@ void *task_malloc_check(size_t bytes) {
   uintptr_t saved_lr = lr;
 
   Heap *heap = task_heap_get_for_current_task();
-  void *mem = heap_malloc(heap, bytes, saved_lr);
+  void *mem;
+
+  if (prv_current_task_uses_kernel_heap()) {
+    mem = kernel_heap_malloc(bytes, saved_lr);
+  } else {
+    mem = heap_malloc(heap, bytes, saved_lr);
+  }
 
   if (!mem && bytes != 0) {
     PBL_CROAK_OOM(bytes, saved_lr, heap);
@@ -61,6 +81,11 @@ void *task_malloc_check(size_t bytes) {
 
 #if defined(CONFIG_MALLOC_INSTRUMENTATION)
 void task_free_with_pc(void *ptr, uintptr_t client_pc) {
+  if (prv_current_task_uses_kernel_heap()) {
+    kernel_heap_free(ptr, client_pc);
+    return;
+  }
+
   heap_free(task_heap_get_for_current_task(), ptr, client_pc);
 }
 #endif
@@ -69,6 +94,11 @@ void task_free(void* ptr) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
+  if (prv_current_task_uses_kernel_heap()) {
+    kernel_heap_free(ptr, saved_lr);
+    return;
+  }
+
   heap_free(task_heap_get_for_current_task(), ptr, saved_lr);
 }
 
@@ -76,12 +106,20 @@ void *task_realloc(void* ptr, size_t size) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
+  if (prv_current_task_uses_kernel_heap()) {
+    return kernel_heap_realloc(ptr, size, saved_lr);
+  }
+
   return heap_realloc(task_heap_get_for_current_task(), ptr, size, saved_lr);
 }
 
 void *task_zalloc(size_t size) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
+
+  if (prv_current_task_uses_kernel_heap()) {
+    return kernel_heap_calloc(1U, size, saved_lr);
+  }
 
   return heap_zalloc(task_heap_get_for_current_task(), size, saved_lr);
 }
@@ -91,7 +129,13 @@ void *task_zalloc_check(size_t bytes) {
   uintptr_t saved_lr = lr;
 
   Heap *heap = task_heap_get_for_current_task();
-  void *mem = heap_zalloc(heap, bytes, saved_lr);
+  void *mem;
+
+  if (prv_current_task_uses_kernel_heap()) {
+    mem = kernel_heap_calloc(1U, bytes, saved_lr);
+  } else {
+    mem = heap_zalloc(heap, bytes, saved_lr);
+  }
 
   if (!mem && bytes != 0) {
     PBL_CROAK_OOM(bytes, saved_lr, heap);
@@ -103,6 +147,10 @@ void *task_calloc(size_t count, size_t size) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
+  if (prv_current_task_uses_kernel_heap()) {
+    return kernel_heap_calloc(count, size, saved_lr);
+  }
+
   return heap_calloc(task_heap_get_for_current_task(), count, size, saved_lr);
 }
 
@@ -111,7 +159,13 @@ void *task_calloc_check(size_t count, size_t size) {
   uintptr_t saved_lr = lr;
 
   Heap *heap = task_heap_get_for_current_task();
-  void *mem = heap_calloc(heap, count, size, saved_lr);
+  void *mem;
+
+  if (prv_current_task_uses_kernel_heap()) {
+    mem = kernel_heap_calloc(count, size, saved_lr);
+  } else {
+    mem = heap_calloc(heap, count, size, saved_lr);
+  }
 
   const size_t bytes = count * size;
   if (!mem && bytes != 0) {
@@ -123,6 +177,14 @@ void *task_calloc_check(size_t count, size_t size) {
 char *task_strdup(const char *s) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
+
+  if (prv_current_task_uses_kernel_heap()) {
+    char *dup = kernel_heap_calloc(1U, strlen(s) + 1U, saved_lr);
+    if (dup) {
+      strcpy(dup, s);
+    }
+    return dup;
+  }
 
   return prv_strdup(task_heap_get_for_current_task(), s, saved_lr);
 }
@@ -216,7 +278,7 @@ void *kernel_malloc(size_t bytes) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
-  return heap_malloc(kernel_heap_get(), bytes, saved_lr);
+  return kernel_heap_malloc(bytes, saved_lr);
 }
 
 void *kernel_malloc_check(size_t bytes) {
@@ -224,7 +286,7 @@ void *kernel_malloc_check(size_t bytes) {
   uintptr_t saved_lr = lr;
 
   Heap *heap = kernel_heap_get();
-  void *mem = heap_malloc(heap, bytes, saved_lr);
+  void *mem = kernel_heap_malloc(bytes, saved_lr);
   if (!mem && bytes != 0) {
     PBL_CROAK_OOM(bytes, saved_lr, heap);
   }
@@ -235,7 +297,7 @@ void *kernel_calloc(size_t count, size_t size) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
-  return (heap_calloc(kernel_heap_get(), count, size, saved_lr));
+  return kernel_heap_calloc(count, size, saved_lr);
 }
 
 void *kernel_calloc_check(size_t count, size_t size) {
@@ -243,7 +305,7 @@ void *kernel_calloc_check(size_t count, size_t size) {
   uintptr_t saved_lr = lr;
 
   Heap *heap = kernel_heap_get();
-  void *mem = heap_calloc(heap, count, size, saved_lr);
+  void *mem = kernel_heap_calloc(count, size, saved_lr);
 
   const size_t bytes = count * size;
   if (!mem && bytes != 0) {
@@ -256,14 +318,14 @@ void *kernel_realloc(void *ptr, size_t bytes) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
-  return heap_realloc(kernel_heap_get(), ptr, bytes, saved_lr);
+  return kernel_heap_realloc(ptr, bytes, saved_lr);
 }
 
 void *kernel_zalloc(size_t size) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
-  return heap_zalloc(kernel_heap_get(), size, saved_lr);
+  return kernel_heap_calloc(1U, size, saved_lr);
 }
 
 void *kernel_zalloc_check(size_t bytes) {
@@ -271,7 +333,7 @@ void *kernel_zalloc_check(size_t bytes) {
   uintptr_t saved_lr = lr;
 
   Heap *heap = kernel_heap_get();
-  void *mem = heap_zalloc(heap, bytes, saved_lr);
+  void *mem = kernel_heap_calloc(1U, bytes, saved_lr);
 
   if (!mem && bytes != 0) {
     PBL_CROAK_OOM(bytes, saved_lr, heap);
@@ -283,14 +345,18 @@ void kernel_free(void *ptr) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
-  heap_free(kernel_heap_get(), ptr, saved_lr);
+  kernel_heap_free(ptr, saved_lr);
 }
 
 char *kernel_strdup(const char *s) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
-  return prv_strdup(kernel_heap_get(), s, saved_lr);
+  char *dup = kernel_heap_calloc(1U, strlen(s) + 1U, saved_lr);
+  if (dup) {
+    strcpy(dup, s);
+  }
+  return dup;
 }
 
 char *kernel_strdup_check(const char *s) {
@@ -298,11 +364,12 @@ char *kernel_strdup_check(const char *s) {
   uintptr_t saved_lr = lr;
 
   Heap *heap = kernel_heap_get();
-  void *mem = prv_strdup(heap, s, saved_lr);
+  char *mem = kernel_heap_calloc(1U, strlen(s) + 1U, saved_lr);
   if (!mem) {
     PBL_CROAK_OOM(strlen(s) + 1, saved_lr, heap);
   }
 
+  strcpy(mem, s);
   return mem;
 }
 
@@ -314,12 +381,21 @@ void *__wrap_malloc(size_t bytes) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
+  if (prv_current_task_uses_kernel_heap()) {
+    return kernel_heap_malloc(bytes, saved_lr);
+  }
+
   return heap_malloc(task_heap_get_for_current_task(), bytes, saved_lr);
 }
 
 void __wrap_free(void *ptr) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
+
+  if (prv_current_task_uses_kernel_heap()) {
+    kernel_heap_free(ptr, saved_lr);
+    return;
+  }
 
   heap_free(task_heap_get_for_current_task(), ptr, saved_lr);
 }
@@ -328,6 +404,10 @@ void *__wrap_realloc(void *ptr, size_t size) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
+  if (prv_current_task_uses_kernel_heap()) {
+    return kernel_heap_realloc(ptr, size, saved_lr);
+  }
+
   return heap_realloc(task_heap_get_for_current_task(), ptr, size, saved_lr);
 }
 
@@ -335,6 +415,9 @@ void *__wrap_calloc(size_t count, size_t size) {
   register uintptr_t lr __asm("lr");
   uintptr_t saved_lr = lr;
 
+  if (prv_current_task_uses_kernel_heap()) {
+    return kernel_heap_calloc(count, size, saved_lr);
+  }
+
   return heap_calloc(task_heap_get_for_current_task(), count, size, saved_lr);
 }
-

@@ -100,6 +100,7 @@ def options(opt):
                              'qemu_emery',
                              'qemu_flint',
                              'qemu_gabbro',
+                             'fruitjam_rp2350',
                             ],
                    help='Which board we are targeting '
                         'asterix, obelix, getafix...')
@@ -428,7 +429,7 @@ def size_resources(ctx):
 
     if ctx.env.CONFIG_SOC_NRF52:
         max_size = 1024 * 1024
-    elif ctx.env.CONFIG_SOC_SF32LB52:
+    elif ctx.env.CONFIG_SOC_SF32LB52 or ctx.env.CONFIG_SOC_RP2350:
         max_size = 2048 * 1024
     elif ctx.env.CONFIG_QEMU:
         max_size = 2048 * 1024
@@ -638,6 +639,8 @@ def _check_firmware_image_size(ctx, path):
             max_firmware_size = 3072 * BYTES_PER_K
     elif ctx.env.CONFIG_QEMU:
         max_firmware_size = 4096 * BYTES_PER_K
+    elif ctx.env.CONFIG_SOC_RP2350:
+        max_firmware_size = 16 * 1024 * BYTES_PER_K
     else:
         ctx.fatal('Cannot check firmware size against unknown micro family')
 

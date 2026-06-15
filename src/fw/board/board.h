@@ -9,6 +9,8 @@
 # include "board_nrf5.h"
 #elif defined(CONFIG_SOC_SF32LB52)
 # include "board_sf32lb52.h"
+#elif defined(CONFIG_SOC_RP2350)
+# include "board_rp2350.h"
 #elif !defined(SDK) && !defined(UNITTEST)
 # error "Unknown or missing MICRO_FAMILY_* define"
 #endif

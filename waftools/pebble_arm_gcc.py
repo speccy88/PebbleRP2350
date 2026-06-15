@@ -237,6 +237,11 @@ Or re-configure with the --relax_toolchain_restrictions option. """
     elif conf.env.CONFIG_SOC_SF32LB52:
         args += ["-mcpu=star-mc1"]
         cpu_fpu = "fpv5-sp-d16"
+    elif conf.env.CONFIG_SOC_RP2350:
+        args += ["-mcpu=cortex-m33", "-march=armv8-m.main+fp+dsp"]
+        args += ["-Dsniprintf=snprintf"]
+        args += ["-D_USE_LONG_TIME_T"]
+        cpu_fpu = "fpv5-sp-d16"
     elif conf.env.CONFIG_QEMU and conf.env.CONFIG_CORTEX_M4:
         args += ["-mcpu=cortex-m4"]
         args += ["-Dsniprintf=snprintf"]

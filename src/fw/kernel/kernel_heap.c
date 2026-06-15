@@ -8,6 +8,9 @@
 #include "util/heap.h"
 
 #include <cmsis_core.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
 static Heap s_kernel_heap;
 static bool s_interrupts_disabled_by_heap;
@@ -43,6 +46,33 @@ void kernel_heap_init(void) {
     .lock_function = prv_heap_lock,
     .unlock_function = prv_heap_unlock
   });
+}
+
+void *kernel_heap_malloc(size_t bytes, uintptr_t client_pc) {
+  return heap_malloc(&s_kernel_heap, bytes, client_pc);
+}
+
+void *kernel_heap_calloc(size_t count, size_t size, uintptr_t client_pc) {
+  const size_t bytes = count * size;
+  void *ptr = kernel_heap_malloc(bytes, client_pc);
+
+  if (ptr) {
+    memset(ptr, 0, bytes);
+  }
+
+  return ptr;
+}
+
+void *kernel_heap_realloc(void *ptr, size_t bytes, uintptr_t client_pc) {
+  if (!ptr) {
+    return kernel_heap_malloc(bytes, client_pc);
+  }
+
+  return heap_realloc(&s_kernel_heap, ptr, bytes, client_pc);
+}
+
+void kernel_heap_free(void *ptr, uintptr_t client_pc) {
+  heap_free(&s_kernel_heap, ptr, client_pc);
 }
 
 void pbl_analytics_external_collect_kernel_heap_stats(void) {

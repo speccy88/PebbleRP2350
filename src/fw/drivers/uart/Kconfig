@@ -19,6 +19,11 @@ config UART_SF32LB
     help
       Support for the SiFli SF32LB UART controller.
 
+config UART_RP2350
+    bool "Raspberry Pi RP2350 UART Controller"
+    help
+      Support for the RP2350 UART controller.
+
 config UART_QEMU
     bool "QEMU Simple UART"
     help

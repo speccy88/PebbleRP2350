@@ -13,6 +13,9 @@ config SOC_NRF52
 config SOC_SF32LB52
     bool "SiFli SF32LB52"
 
+config SOC_RP2350
+    bool "Raspberry Pi RP2350"
+
 config SOC_QEMU
     bool "QEMU emulated"
 
@@ -22,6 +25,7 @@ config SOC
     string
     default "NRF52" if SOC_NRF52
     default "SF32LB52" if SOC_SF32LB52
+    default "RP2350" if SOC_RP2350
     help
       Stringified SoC name, for places that need the name as a token
       (e.g. sftool -c). Empty on QEMU boards.
@@ -37,6 +41,7 @@ choice
     prompt "ARM Cortex core"
     default CORTEX_M4 if SOC_NRF52
     default CORTEX_M33 if SOC_SF32LB52
+    default CORTEX_M33 if SOC_RP2350
 
 config CORTEX_M4
     bool "Cortex-M4"

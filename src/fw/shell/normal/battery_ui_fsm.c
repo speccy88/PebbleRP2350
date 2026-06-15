@@ -8,6 +8,7 @@
 #include "applib/ui/vibes.h"
 #include "apps/system_app_ids.h"
 #include "apps/system/battery_critical.h"
+#include "board/board.h"
 #include "kernel/low_power.h"
 #include "kernel/ui/modals/modal_manager.h"
 #include "kernel/util/standby.h"
@@ -241,6 +242,10 @@ static bool prv_is_valid_transition(BatteryUIStateID next_state) {
 }
 
 static BatteryUIStateID prv_get_state(PreciseBatteryChargeState *state) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return BatteryGood;
+  }
+
   // Don't use the PreciseBatteryChargeState definition of is_charging, as it maps to the
   // result of @see battery_charge_controller_thinks_we_are_charging instead of the actual
   // user-facing definition of charging.
@@ -264,13 +269,15 @@ static BatteryUIStateID prv_get_state(PreciseBatteryChargeState *state) {
 
 void battery_ui_handle_state_change_event(PreciseBatteryChargeState charge_state) {
   BatteryUIStateID next_state = prv_get_state(&charge_state);
-  if (prv_is_valid_transition(next_state)) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    prv_transition(next_state, &charge_state);
+  } else if (prv_is_valid_transition(next_state)) {
     prv_transition(next_state, &charge_state);
   }
 }
 
 void battery_ui_handle_shut_down(void) {
-  if (s_state != BatteryCharging) {
+  if (BOARD_CONFIG_POWER.fixed_power || s_state != BatteryCharging) {
     enter_standby(RebootReasonCode_ShutdownMenuItem);
   } else {
     prv_transition(BatteryShutdownCharging, NULL);

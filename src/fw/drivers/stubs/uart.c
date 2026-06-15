@@ -73,5 +73,8 @@ void uart_clear_all_interrupt_flags(UARTDevice *dev) {
 void uart_stop_rx_dma(UARTDevice *dev) {
 }
 
+void uart_start_rx_dma(UARTDevice *dev, void *buffer, uint32_t length) {
+}
+
 void uart_clear_rx_dma_buffer(UARTDevice *dev) {
 }

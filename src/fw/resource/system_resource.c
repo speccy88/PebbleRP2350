@@ -22,9 +22,16 @@
 #include "resource/resource_version.auto.h"
 #include "font_resource_table.auto.h"
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
+#endif
+
 void system_resource_init(void) {
   if (!resource_init_app(SYSTEM_APP, &SYSTEM_RESOURCE_VERSION)) {
     // System resources are missing!
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_boot_progress_show(FruitJamBootProgressStageResourceError);
+#endif
 #if defined(CONFIG_IS_BIGBOARD)
     static const uint32_t ERROR_BAD_RESOURCES = 0xfe504505;
     pbl_log(LOG_LEVEL_ERROR, __FILE_NAME__, __LINE__,
@@ -107,4 +114,3 @@ DEFINE_SYSCALL(void, sys_font_reload_font, FontInfo *fontinfo) {
   text_resources_init_font(fontinfo->base.app_num, fontinfo->base.resource_id,
       fontinfo->extension.resource_id, fontinfo);
 }
-

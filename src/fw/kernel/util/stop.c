@@ -57,7 +57,7 @@ void enter_stop_mode(void) {
 
   dbgserial_enable_rx_dma_after_stop();
 }
-#elif defined(CONFIG_QEMU)
+#elif defined(CONFIG_QEMU) || defined(CONFIG_SOC_RP2350)
 void enter_stop_mode(void) {
 }
 #endif

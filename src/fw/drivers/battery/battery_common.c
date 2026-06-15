@@ -3,12 +3,17 @@
 
 #include "drivers/battery.h"
 
+#include "board/board.h"
 #include "drivers/gpio.h"
 #include "drivers/periph_config.h"
 
 static bool s_charging_forced_disable = false;
 
 bool battery_charge_controller_thinks_we_are_charging(void) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return false;
+  }
+
   if (s_charging_forced_disable) {
     return false;
   }
@@ -17,6 +22,10 @@ bool battery_charge_controller_thinks_we_are_charging(void) {
 }
 
 bool battery_is_usb_connected(void) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return false;
+  }
+
   if (s_charging_forced_disable) {
     return false;
   }

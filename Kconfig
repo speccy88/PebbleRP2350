@@ -95,6 +95,11 @@ config BOARD_FAMILY_GETAFIX
     help
       Hidden symbol selected by boards in the Getafix family.
 
+config BOARD_FAMILY_FRUITJAM
+    bool
+    help
+      Hidden symbol selected by boards in the Fruit Jam family.
+
 config BOARD_FAMILY_NAME
     string
     help

@@ -105,6 +105,11 @@ elif bld.env.CONFIG_SOC_SF32LB52:
             'NIMBLE_HCI_SF32LB52_TRACE_LOG',
         ])
 
+elif bld.env.CONFIG_SOC_RP2350:
+    nimble_sources += [
+        'transport/hci_fruitjam_rp2350.c',
+    ]
+
 
 bld.objects(
     source=nimble_sources,

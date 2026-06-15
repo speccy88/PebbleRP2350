@@ -44,6 +44,8 @@ Profiler g_profiler;
 #include "irq_qemu.def"
 #elif defined(CONFIG_SOC_NRF52)
 #include "irq_nrf52.def"
+#elif defined(CONFIG_SOC_RP2350)
+#include "irq_rp2350.def"
 #elif defined(CONFIG_SOC_SF32LB52)
 #include "irq_sf32lb52.def"
 #else
@@ -62,6 +64,8 @@ static ProfilerNode *s_profiler_nodes[] = {
 #include "irq_qemu.def"
 #elif defined(CONFIG_SOC_NRF52)
 #include "irq_nrf52.def"
+#elif defined(CONFIG_SOC_RP2350)
+#include "irq_rp2350.def"
 #elif defined(CONFIG_SOC_SF32LB52)
 #include "irq_sf32lb52.def"
 #else
@@ -130,7 +134,7 @@ uint32_t profiler_cycles_to_us(uint32_t cycles) {
   uint32_t mhz = NRFX_DELAY_CPU_FREQ_MHZ;
 #elif defined(CONFIG_SOC_SF32LB52)
   uint32_t mhz = HAL_RCC_GetHCLKFreq(CORE_ID_HCPU);
-#elif defined(CONFIG_QEMU)
+#elif defined(CONFIG_QEMU) || defined(CONFIG_SOC_RP2350)
   uint32_t mhz = SystemCoreClock / 1000000;
 #else
   RCC_ClocksTypeDef clocks;
@@ -161,7 +165,7 @@ uint32_t profiler_get_total_duration(bool in_us) {
     uint32_t mhz = NRFX_DELAY_CPU_FREQ_MHZ;
 #elif defined(CONFIG_SOC_SF32LB52)
     uint32_t mhz = HAL_RCC_GetHCLKFreq(CORE_ID_HCPU);
-#elif defined(CONFIG_QEMU)
+#elif defined(CONFIG_QEMU) || defined(CONFIG_SOC_RP2350)
     uint32_t mhz = SystemCoreClock / 1000000;
 #else
     RCC_ClocksTypeDef clocks;
@@ -186,7 +190,7 @@ void profiler_print_stats(void) {
   uint32_t mhz = HAL_RCC_GetHCLKFreq(CORE_ID_HCPU);
   char buf[80];
   PROF_LOG(buf, sizeof(buf), "CPU Frequency: %"PRIu32"MHz", mhz);
-#elif defined(CONFIG_QEMU)
+#elif defined(CONFIG_QEMU) || defined(CONFIG_SOC_RP2350)
   uint32_t mhz = SystemCoreClock / 1000000;
   char buf[80];
   PROF_LOG(buf, sizeof(buf), "CPU Frequency: %"PRIu32"MHz", mhz);

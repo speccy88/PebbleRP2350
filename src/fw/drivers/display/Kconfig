@@ -19,6 +19,25 @@ config DISPLAY_SHARP_LS013B7DH01_NRF5
     help
       Support for the Sharp LS013B7DH01 display via nRF5.
 
+config DISPLAY_SHARP_LS013B7DH01_RP2350
+    bool "Sharp LS013B7DH01 (RP2350)"
+    help
+      Support for the Sharp LS013B7DH01 display via RP2350.
+
+config DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT
+    bool "Use experimental RP2350 SPI1 transport for Sharp display"
+    depends on DISPLAY_SHARP_LS013B7DH01_RP2350
+    help
+      Use RP2350 SPI1 for the Sharp display instead of the hardware-verified
+      bit-banged transport.
+
+config DISPLAY_SHARP_LS013B7DH01_RP2350_BRINGUP_LOOP
+    bool "Hold RP2350 Sharp display in bring-up test loop"
+    depends on DISPLAY_SHARP_LS013B7DH01_RP2350
+    help
+      Keep the Fruit Jam RP2350 firmware in a visible FreeRTOS display test
+      loop after display initialization.
+
 config DISPLAY_QEMU
     bool "QEMU Framebuffer Display"
     help

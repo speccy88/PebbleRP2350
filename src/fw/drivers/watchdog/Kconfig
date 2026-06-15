@@ -23,4 +23,9 @@ config WATCHDOG_QEMU
     help
       Support for the QEMU watchdog (no-op).
 
+config WATCHDOG_STUB
+    bool "Stub Watchdog"
+    help
+      No-op watchdog.
+
 endif # WATCHDOG

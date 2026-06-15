@@ -26,6 +26,17 @@
 #include "pbl/services/bluetooth/ble_hrm.h"
 #include "system/logging.h"
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
+#include "system/reboot_reason.h"
+#define FRUITJAM_BOOT_PROGRESS_WRITE(stage) fruitjam_boot_progress_mark(stage)
+#define FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(stage, label) \
+  fruitjam_boot_progress_mark_label((stage), (label))
+#else
+#define FRUITJAM_BOOT_PROGRESS_WRITE(stage) ((void)0)
+#define FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(stage, label) ((void)0)
+#endif
+
 PBL_LOG_MODULE_DEFINE(service_bluetooth, CONFIG_SERVICE_BLUETOOTH_LOG_LEVEL);
 
 static bool s_comm_initialized = false;
@@ -35,10 +46,23 @@ static bool s_comm_is_running = false;
 static bool s_comm_state_change_eval_is_scheduled;
 static BtCtlModeOverride s_comm_override = BtCtlModeOverrideNone;
 static PebbleMutex *s_comm_state_change_mutex;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+static bool s_fruitjam_bluetooth_holdoff;
+
+static bool prv_fruitjam_bluetooth_holdoff_active(void) {
+  return s_fruitjam_bluetooth_holdoff && s_comm_override != BtCtlModeOverrideRun;
+}
+#endif
 
 bool bt_ctl_is_airplane_mode_on(void) { return s_comm_airplane_mode_on; }
 
 bool bt_ctl_is_bluetooth_active(void) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  if (prv_fruitjam_bluetooth_holdoff_active()) {
+    return false;
+  }
+#endif
+
   if (s_comm_enabled) {
     if (s_comm_override == BtCtlModeOverrideRun) {
       return true;
@@ -79,10 +103,12 @@ static void prv_comm_start(void) {
   // no-op bonding handlers, so doing it early is harmless for them too.
   bt_persistent_storage_register_existing_ble_bondings();
 
+  FRUITJAM_BOOT_PROGRESS_WRITE(FruitJamBootProgressStageBluetoothStart);
   s_comm_is_running = bt_driver_start(config);
   kernel_free(config);
 
   if (s_comm_is_running) {
+    FRUITJAM_BOOT_PROGRESS_WRITE(FruitJamBootProgressStageBluetoothDone);
     bt_local_addr_init();
     gap_le_init();
     bt_local_id_configure_driver();
@@ -92,6 +118,7 @@ static void prv_comm_start(void) {
     ble_bas_init();
     bt_pairability_init();
   } else {
+    FRUITJAM_BOOT_PROGRESS_WRITE(FruitJamBootProgressStageBluetoothUnavailable);
     PBL_LOG_ERR("BT driver failed to start!");
     // FIXME: PBL-36163 -- handle this better
   }
@@ -224,6 +251,16 @@ void bt_ctl_init(void) {
   s_comm_state_change_mutex = mutex_create();
 
   s_comm_airplane_mode_on = bt_persistent_storage_get_airplane_mode_enabled();
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  RebootReason reason;
+  reboot_reason_get(&reason);
+  s_fruitjam_bluetooth_holdoff =
+      reason.code >= RebootReasonCode_Watchdog && !reason.restarted_safely;
+  if (s_fruitjam_bluetooth_holdoff) {
+    FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStageBluetoothUnavailable, "BT HOLD");
+    PBL_LOG_WRN("Holding Bluetooth off after unsafe reboot reason %u", (unsigned)reason.code);
+  }
+#endif
   s_comm_initialized = true;
 
   gatt_client_subscription_boot();

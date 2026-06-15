@@ -34,8 +34,16 @@ typedef union _tagAlignmentStruct_t
 /* buffer.                                                           */
 #define LARGE_SIZE              (256/ALIGNMENT_SIZE)
 
+#if defined(CONFIG_SOC_RP2350)
+typedef uint32_t HeapSegmentSize;
+#define HEAP_SEGMENT_SIZE_BITS 31U
+#else
+typedef uint16_t HeapSegmentSize;
+#define HEAP_SEGMENT_SIZE_BITS 15U
+#endif
+
 //! The maximum size of the heap as a number of ALIGNMENT_SIZE
-#define SEGMENT_SIZE_MAX      (0x7FFF)
+#define SEGMENT_SIZE_MAX ((1UL << HEAP_SEGMENT_SIZE_BITS) - 1UL)
 
 /* The following defines the minimum size (in alignment units) of a  */
 /* fragment that is considered useful.  The value is used when trying*/
@@ -50,13 +58,13 @@ typedef union _tagAlignmentStruct_t
 typedef struct _tagHeapInfo_t
 {
   //! Size of the preceding segment, measured in units of ALIGNMENT_SIZE, including the size of this beginer
-  uint16_t PrevSize;
+  HeapSegmentSize PrevSize;
 
   //! Whether or not this block is currently allocated (vs being free).
   bool is_allocated:1;
 
   //! Size of this segment, measured in units of ALIGNMENT_SIZE, including this size of this beginer
-  uint16_t Size:15;
+  HeapSegmentSize Size:HEAP_SEGMENT_SIZE_BITS;
 
 #ifdef CONFIG_MALLOC_INSTRUMENTATION
   uintptr_t pc; //<! The address that called malloc.
@@ -125,8 +133,8 @@ static HeapInfo_t* get_previous_block(Heap * const heap, HeapInfo_t* block) {
 
 static void prv_calc_totals(Heap* const heap, unsigned int *used, unsigned int *free, unsigned int *max_free) {
   HeapInfo_t    *heap_info_ptr;
-  uint16_t      free_segments;
-  uint16_t      alloc_segments;
+  unsigned int  free_segments;
+  unsigned int  alloc_segments;
 
   /* Initialize the return values.                                  */
   *used         = 0;
@@ -525,7 +533,7 @@ void* heap_realloc(Heap* const heap, void *ptr, unsigned long nbytes, uintptr_t 
   if (new_ptr && ptr) {
     // Copy over old data.
     const HeapInfo_t *heap_info_ptr = HEAP_INFO_FOR_PTR(ptr);
-    const uint16_t original_size = heap_info_ptr->Size * ALIGNMENT_SIZE;
+    const size_t original_size = heap_info_ptr->Size * ALIGNMENT_SIZE;
     memcpy(new_ptr, ptr, MIN(nbytes, original_size));
     heap_free(heap, ptr, client_pc);
   }

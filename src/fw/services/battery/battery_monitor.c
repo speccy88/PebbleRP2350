@@ -164,6 +164,13 @@ static void prv_log_battery_state(PreciseBatteryChargeState state) {
 void battery_monitor_handle_state_change_event(PreciseBatteryChargeState state) {
   // Update Critical/Low Power Mode
 
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    s_low_on_first_run = false;
+    s_first_run = false;
+    prv_transition(PowerStateGood);
+    return;
+  }
+
   // Standby behaviour, as gleaned from the previous implementation:
   //  Once the battery voltage falls below exactly 0%, the standby lockout is displayed.
   //  If the USB cable is disconnected, the standby timer starts. This standby delay is 2s
@@ -231,6 +238,10 @@ void battery_monitor_init(void) {
 }
 
 bool battery_monitor_critical_lockout(void) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return false;
+  }
+
   // critical or low on first run
   return s_power_state == PowerStateCritical;
 }

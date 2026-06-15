@@ -19,6 +19,11 @@ config EXTI_SF32LB
     help
       Support for the SiFli SF32LB external interrupt controller.
 
+config EXTI_RP2350
+    bool "Raspberry Pi RP2350"
+    help
+      Support for the RP2350 external interrupt controller.
+
 config EXTI_QEMU
     bool "QEMU External Interrupt"
     help

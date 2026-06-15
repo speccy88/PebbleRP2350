@@ -23,6 +23,8 @@
 #define COREDUMP_RAM_SIZE (276 * 1024)
 #elif defined(CONFIG_BOARD_FAMILY_ASTERIX)
 #define COREDUMP_RAM_SIZE (256 * 1024)
+#elif defined(CONFIG_SOC_RP2350)
+#define COREDUMP_RAM_SIZE (520 * 1024)
 #endif
 
 // LCPU (BLE coprocessor) RAM, in the LPSYS domain outside main RAM.
@@ -38,6 +40,8 @@
 #if defined(CONFIG_SOC_NRF52)
 #define CORE_DUMP_MAX_IMAGES 2
 #elif defined(CONFIG_SOC_SF32LB52)
+#define CORE_DUMP_MAX_IMAGES 1
+#elif defined(CONFIG_SOC_RP2350)
 #define CORE_DUMP_MAX_IMAGES 1
 #elif defined(CONFIG_QEMU)
 #define CORE_DUMP_MAX_IMAGES 1

@@ -66,6 +66,30 @@ elif bld.env.CONFIG_BOARD_FAMILY_GETAFIX:
         'driver_rc10k',
         'driver_task_watchdog',
     ])
+elif bld.env.CONFIG_BOARD_FAMILY_FRUITJAM:
+    bld.env.DRIVERS.extend([
+        'driver_fruitjam_stubs',
+        'driver_button',
+        'driver_mcu',
+        'driver_mpu',
+        'driver_otp',
+        'driver_pwr',
+        'driver_task_watchdog',
+    ])
+
+    bld.objects(
+        name='driver_fruitjam_stubs',
+        source=[
+            'stubs/accel.c',
+            'stubs/ambient_light.c',
+            'stubs/backlight.c',
+            'stubs/vibe.c',
+        ],
+        use=[
+            'fw_includes',
+            'pbl_includes',
+        ],
+    )
 ## ----------
 
 if bld.env.CONFIG_SPEAKER:
@@ -122,6 +146,18 @@ elif bld.env.CONFIG_SOC_SF32LB52:
             'freertos',
             'fw_includes',
             'hal_sifli',
+        ],
+    )
+elif bld.env.CONFIG_SOC_RP2350:
+    bld.objects(
+        name='driver_button',
+        source=[
+            'rp2350/button.c',
+        ],
+        use=[
+            'freertos',
+            'fw_includes',
+            'pbl_includes',
         ],
     )
 
@@ -200,6 +236,16 @@ elif bld.env.CONFIG_SOC_SF32LB52:
         use=[
             'fw_includes',
             'hal_sifli',
+        ],
+    )
+elif bld.env.CONFIG_SOC_RP2350:
+    bld.objects(
+        name='driver_mcu',
+        source=[
+            'stubs/mcu.c',
+        ],
+        use=[
+            'fw_includes',
         ],
     )
 
@@ -319,6 +365,19 @@ elif bld.env.CONFIG_SOC_SF32LB52:
         ],
     )
 elif bld.env.CONFIG_QEMU:
+    bld.objects(
+        name='driver_task_watchdog',
+        source=[
+            'task_watchdog.c',
+        ],
+        use=[
+
+            'freertos',
+            'fw_includes',
+            'pbl_includes',
+        ],
+    )
+elif bld.env.CONFIG_SOC_RP2350:
     bld.objects(
         name='driver_task_watchdog',
         source=[

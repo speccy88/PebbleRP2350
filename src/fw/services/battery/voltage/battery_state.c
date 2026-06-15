@@ -69,6 +69,15 @@ static uint32_t s_analytics_last_cpct = 0;
 static void prv_schedule_update(uint32_t delay, bool force_update);
 PreciseBatteryChargeState prv_get_precise_charge_state(const BatteryState *state);
 
+static PreciseBatteryChargeState prv_get_fixed_power_charge_state(void) {
+  return (PreciseBatteryChargeState) {
+    .charge_percent = RATIO32_MAX,
+    .pct = 100,
+    .is_charging = false,
+    .is_plugged = false,
+  };
+}
+
 static void prv_transition(BatteryState *state, ConnectionStateID next_state) {
   state->connection = next_state;
   s_transitions[state->connection].enter();
@@ -163,6 +172,17 @@ static ConnectionStateID prv_get_connection_state(void) {
 static void prv_update_state(void *force_update) {
   const uint8_t MAX_SAMPLE_SKIPS = 5;
   bool forced = (bool)force_update;
+
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    s_last_battery_state.connection = ConnectionStateDischargingUnplugged;
+    s_last_battery_state.percent = RATIO32_MAX;
+    s_last_battery_state.voltage = battery_get_millivolts();
+    if (forced) {
+      battery_state_put_change_event(prv_get_fixed_power_charge_state());
+    }
+    return;
+  }
+
   // Large current draws will cause the voltage supplied by the battery to
   // droop. We try to only sample the battery when there is minimal
   // activity. We look to see if stop mode is allowed because this is a good
@@ -234,6 +254,10 @@ static void prv_update_callback(void *data) {
   // dispatch to a lower priority task
   system_task_add_callback(prv_update_state, data);
 
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return;
+  }
+
   // Reschedule ourselves again so we create a loop
   prv_schedule_update(BATTERY_SAMPLE_RATE_MS, false);
 }
@@ -256,7 +280,10 @@ void battery_state_force_update(void) {
 void battery_state_init(void) {
   s_periodic_timer_id = new_timer_create();
 
-  s_last_battery_state = (BatteryState) { .connection = ConnectionStateDischargingUnplugged };
+  s_last_battery_state = (BatteryState) {
+    .connection = ConnectionStateDischargingUnplugged,
+    .percent = BOARD_CONFIG_POWER.fixed_power ? RATIO32_MAX : 0,
+  };
   battery_state_reset_filter();
   battery_state_force_update();
 
@@ -267,6 +294,10 @@ void battery_state_init(void) {
 void battery_state_handle_connection_event(bool is_connected) {
   static const uint32_t RECONNECTION_DELAY_MS = 1000;
 
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return;
+  }
+
   PBL_LOG_VERBOSE("USB Connected:%d", is_connected);
 
   // Trigger a reset update to the state machine. Delay the update to allow the battery voltage to
@@ -275,6 +306,10 @@ void battery_state_handle_connection_event(bool is_connected) {
 }
 
 PreciseBatteryChargeState prv_get_precise_charge_state(const BatteryState *state) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return prv_get_fixed_power_charge_state();
+  }
+
   PreciseBatteryChargeState event_state = {
     .charge_percent = state->percent,
     .pct = ratio32_to_percent(state->percent),
@@ -289,6 +324,14 @@ DEFINE_SYSCALL(BatteryChargeState, sys_battery_get_charge_state, void) {
 }
 
 BatteryChargeState battery_get_charge_state(void) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return (BatteryChargeState) {
+      .charge_percent = 100,
+      .is_charging = false,
+      .is_plugged = false,
+    };
+  }
+
   bool is_plugged = (s_last_battery_state.connection != ConnectionStateDischargingUnplugged);
 
 #ifdef CONFIG_QEMU

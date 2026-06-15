@@ -21,11 +21,19 @@
 #include <system/logging.h>
 #include <system/passert.h>
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_bt_debug.h"
+#endif
+
 #include "nimble_store.h"
 
 PBL_LOG_MODULE_DEFINE(bt, CONFIG_BT_LOG_LEVEL);
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+static const uint32_t s_bt_stack_start_stop_timeout_ms = 3000;
+#else
 static const uint32_t s_bt_stack_start_stop_timeout_ms = 10000;
+#endif
 
 extern void pebble_pairing_service_init(void);
 extern void nimble_discover_init(void);
@@ -52,12 +60,18 @@ static DriverState s_driver_state = DriverStateStopped;
 
 static void prv_sync_cb(void) {
   PBL_LOG_DBG("NimBLE host synchronized");
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_host_sync();
+#endif
   xSemaphoreGive(s_host_started);
   bt_driver_handle_host_resynced();
 }
 
 static void prv_reset_cb(int reason) {
   PBL_LOG_WRN("NimBLE host reset (reason: 0x%04x)", (uint16_t)reason);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_host_reset(reason);
+#endif
 #ifdef CONFIG_SOC_SF32LB52
   // Controller stopped answering HCI. Crash so the coredump captures LCPU RAM
   // (core_dump wakes the LCPU itself); the reboot cold-recovers the controller.
@@ -75,6 +89,38 @@ static void prv_host_task_main(void *unused) {
 }
 
 static void prv_ble_hs_stop_cb(int status, void *arg) { xSemaphoreGive(s_host_stopped); }
+
+static bool prv_stop_after_start_failure(const char *reason, bool assert_on_stop_timeout) {
+  int rc;
+  BaseType_t f_rc;
+
+  PBL_LOG_WRN("%s", reason);
+  s_driver_state = DriverStateStopping;
+  (void)xSemaphoreTake(s_host_stopped, 0);
+  rc = ble_hs_stop(&s_listener, prv_ble_hs_stop_cb, NULL);
+  if (rc == BLE_HS_EALREADY) {
+    s_driver_state = DriverStateStopped;
+    (void)ble_gatts_reset();
+    return false;
+  } else if (rc != 0) {
+    PBL_LOG_WRN("Failed to stop NimBLE host after start failure: 0x%04x", (uint16_t)rc);
+    s_driver_state = DriverStateStopped;
+    (void)ble_gatts_reset();
+    return false;
+  }
+
+  f_rc = xSemaphoreTake(s_host_stopped, milliseconds_to_ticks(s_bt_stack_start_stop_timeout_ms));
+  if (f_rc != pdTRUE) {
+    if (assert_on_stop_timeout) {
+      PBL_ASSERT(false, "NimBLE host stop timed out after start failure");
+    }
+    PBL_LOG_WRN("NimBLE host stop timed out after start failure");
+  }
+
+  s_driver_state = DriverStateStopped;
+  (void)ble_gatts_reset();
+  return false;
+}
 
 // ----------------------------------------------------------------------------------------
 void bt_driver_init(void) {
@@ -153,8 +199,13 @@ bool bt_driver_start(BTDriverConfig *config) {
   ble_hs_sched_start();
   f_rc = xSemaphoreTake(s_host_started, milliseconds_to_ticks(s_bt_stack_start_stop_timeout_ms));
   if (f_rc != pdTRUE) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_driver_start(false);
+    return prv_stop_after_start_failure("NimBLE host start timed out; ESP HCI unavailable", false);
+#else
     // core_dump wakes the LCPU itself, so its RAM is captured here too.
     PBL_CROAK("NimBLE host start timed out");
+#endif
   }
 
   rc = ble_hs_util_ensure_addr(0);
@@ -164,27 +215,18 @@ bool bt_driver_start(BTDriverConfig *config) {
   }
 
   s_driver_state = DriverStateStarted;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_start(true);
+#endif
   return true;
 
 err:
-  s_driver_state = DriverStateStopping;
-  (void)xSemaphoreTake(s_host_stopped, 0);
-  rc = ble_hs_stop(&s_listener, prv_ble_hs_stop_cb, NULL);
-  if (rc == BLE_HS_EALREADY) {
-    s_driver_state = DriverStateStopped;
-    return false;
-  } else if (rc != 0) {
-    PBL_LOG_ERR("Failed to stop NimBLE host after start failure: 0x%04x", (uint16_t)rc);
-    return false;
-  }
-
-  f_rc = xSemaphoreTake(s_host_stopped, milliseconds_to_ticks(s_bt_stack_start_stop_timeout_ms));
-  PBL_ASSERT(f_rc == pdTRUE, "NimBLE host stop timed out after start failure");
-
-  s_driver_state = DriverStateStopped;
-  (void)ble_gatts_reset();
-
-  return false;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_driver_start(false);
+  return prv_stop_after_start_failure("NimBLE host start failed", false);
+#else
+  return prv_stop_after_start_failure("NimBLE host start failed", true);
+#endif
 }
 
 void bt_driver_stop(void) {

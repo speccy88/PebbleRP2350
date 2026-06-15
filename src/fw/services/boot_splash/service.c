@@ -3,7 +3,7 @@
 
 #include "pbl/services/boot_splash.h"
 
-#if defined(CONFIG_PBLBOOT) || defined(CONFIG_QEMU)
+#if defined(CONFIG_PBLBOOT) || defined(CONFIG_QEMU) || defined(CONFIG_SOC_RP2350)
 
 #include "board/display.h"
 #include "board/splash.h"
@@ -17,7 +17,14 @@
 #include <string.h>
 
 // Platform-specific colors: PebbleOS uses ARGB2222 (GColor8), not raw RGB332
-#ifdef CONFIG_QEMU
+#if defined(CONFIG_SOC_RP2350)
+// RP2350 Fruit Jam uses the same packed 1bpp layout as Pebble's framebuffer.
+#define SPLASH_COLOR_WHITE  0xFF
+#define SPLASH_COLOR_BLACK  0x00
+#define SPLASH_COLOR_LGRAY  0x80
+#define BOOT_SPLASH_FB_BYTES DISPLAY_FRAMEBUFFER_BYTES
+#define BOOT_SPLASH_BYTES_PER_ROW (DISPLAY_FRAMEBUFFER_BYTES / PBL_DISPLAY_HEIGHT)
+#elif defined(CONFIG_QEMU)
 // QEMU display natively renders ARGB2222
 #define SPLASH_COLOR_WHITE  0xFF  // A=3, R=3, G=3, B=3
 #define SPLASH_COLOR_BLACK  0xC0  // A=3, R=0, G=0, B=0
@@ -48,13 +55,47 @@ static TaskHandle_t s_boot_splash_task;
 static volatile bool s_boot_splash_running;
 static uint8_t *s_boot_splash_fb;
 
+static void prv_draw_pixel(uint8_t *fb, int16_t x, int16_t y, uint8_t color) {
+  if (x < 0 || x >= PBL_DISPLAY_WIDTH || y < 0 || y >= PBL_DISPLAY_HEIGHT) {
+    return;
+  }
+
+#if defined(CONFIG_SOC_RP2350)
+  const bool black =
+      (color == SPLASH_COLOR_BLACK) ||
+      ((color == SPLASH_COLOR_LGRAY) && (((x ^ y) & 1) == 0));
+  uint8_t *byte = &fb[(uint32_t)y * BOOT_SPLASH_BYTES_PER_ROW + (x / 8)];
+  const uint8_t mask = (uint8_t)(1U << (x & 7));
+
+  if (black) {
+    *byte &= (uint8_t)~mask;
+  } else {
+    *byte |= mask;
+  }
+#else
+  fb[(uint32_t)y * PBL_DISPLAY_WIDTH + x] = color;
+#endif
+}
+
 // Draw a filled rectangle
 static void prv_draw_filled_rect(uint8_t *fb, int16_t x0, int16_t y0,
                                  int16_t width, int16_t height, uint8_t color) {
   for (int16_t y = y0; y < y0 + height; y++) {
     for (int16_t x = x0; x < x0 + width; x++) {
-      if (x >= 0 && x < PBL_DISPLAY_WIDTH && y >= 0 && y < PBL_DISPLAY_HEIGHT) {
-        fb[(uint32_t)y * PBL_DISPLAY_WIDTH + x] = color;
+      prv_draw_pixel(fb, x, y, color);
+    }
+  }
+}
+
+static void prv_draw_logo(uint8_t *fb, int16_t logo_x0, int16_t logo_y0) {
+  const uint16_t logo_width = splash_width;
+  const uint16_t logo_height = splash_height;
+  const uint8_t *logo_data = splash_bits;
+
+  for (uint16_t y = 0U; y < logo_height; y++) {
+    for (uint16_t x = 0U; x < logo_width; x++) {
+      if (logo_data[y * (logo_width / 8) + x / 8] & (0x1U << (x & 7))) {
+        prv_draw_pixel(fb, x + logo_x0, y + logo_y0, SPLASH_COLOR_BLACK);
       }
     }
   }
@@ -99,8 +140,6 @@ static void prv_boot_splash_task(void *param) {
   // Get splash logo dimensions
   const uint16_t logo_width = splash_width;
   const uint16_t logo_height = splash_height;
-  const uint8_t *logo_data = splash_bits;
-
   // Calculate logo position (centered)
   uint16_t logo_x0 = (PBL_DISPLAY_WIDTH - logo_width) / 2;
   uint16_t logo_y0 = (PBL_DISPLAY_HEIGHT - logo_height) / 2;
@@ -114,14 +153,7 @@ static void prv_boot_splash_task(void *param) {
     // Clear framebuffer to white
     memset(fb, SPLASH_COLOR_WHITE, BOOT_SPLASH_FB_BYTES);
 
-    // Draw logo
-    for (uint16_t y = 0U; y < logo_height; y++) {
-      for (uint16_t x = 0U; x < logo_width; x++) {
-        if (logo_data[y * (logo_width / 8) + x / 8] & (0x1U << (x & 7))) {
-          fb[(y + logo_y0) * PBL_DISPLAY_WIDTH + (x + logo_x0)] = SPLASH_COLOR_BLACK;
-        }
-      }
-    }
+    prv_draw_logo(fb, logo_x0, logo_y0);
 
     // Draw progress bar
     prv_draw_progress_bar(fb, progress_cx, progress_cy, frame);
@@ -180,20 +212,11 @@ void boot_splash_stop(void) {
       // Get splash logo dimensions
       const uint16_t logo_width = splash_width;
       const uint16_t logo_height = splash_height;
-      const uint8_t *logo_data = splash_bits;
-
       // Calculate logo position (centered, same as animation)
       uint16_t logo_x0 = (PBL_DISPLAY_WIDTH - logo_width) / 2;
       uint16_t logo_y0 = (PBL_DISPLAY_HEIGHT - logo_height) / 2;
 
-      // Draw logo
-      for (uint16_t y = 0U; y < logo_height; y++) {
-        for (uint16_t x = 0U; x < logo_width; x++) {
-          if (logo_data[y * (logo_width / 8) + x / 8] & (0x1U << (x & 7))) {
-            fb[(y + logo_y0) * PBL_DISPLAY_WIDTH + (x + logo_x0)] = SPLASH_COLOR_BLACK;
-          }
-        }
-      }
+      prv_draw_logo(fb, logo_x0, logo_y0);
 
       display_update_boot_frame(fb);
       kernel_free(fb);

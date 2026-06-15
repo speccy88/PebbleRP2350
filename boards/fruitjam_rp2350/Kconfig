@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Core Devices LLC
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_FRUITJAM_RP2350
+    bool
+    default y
+    select BOARD_FAMILY_FRUITJAM

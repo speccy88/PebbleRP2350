@@ -11,6 +11,8 @@ elif bld.env.CONFIG_GPIO_NRF5:
     use.append('hal_nordic')
 elif bld.env.CONFIG_GPIO_SF32LB:
     sources.append('sf32lb.c')
+elif bld.env.CONFIG_GPIO_RP2350:
+    sources.append('rp2350.c')
 
 bld.objects(
     name='driver_gpio',

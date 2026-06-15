@@ -12,6 +12,36 @@
   <a href="https://forum.repebble.com/"><img src="https://img.shields.io/discourse/posts?server=https%3A%2F%2Fforum.repebble.com&label=forum"></a>
 </p>
 
+## Fruit Jam RP2350 preview port
+
+This fork currently carries a bring-up port for the Adafruit Fruit Jam RP2350
+running PebbleOS on the onboard RP2350 with a Waveshare/Pebble-compatible
+144x168 Sharp Memory LCD.
+
+Current verified state:
+
+- `fruitjam_rp2350` configures and builds with the Pico/RP2350 toolchain.
+- The combined UF2 at `build/src/fw/tintin_fw_with_resources.uf2` packages both
+  firmware and Pebble system resources for the Fruit Jam 16 MB XIP flash layout.
+- The memory LCD path, Pebble boot UI, launcher handoff, fixed-power/no-battery
+  mode, USB CDC debug shell, frame capture, and software BOOTSEL entry have
+  been hardware-tested on the Fruit Jam board.
+- Bluetooth is still bring-up work: the RP2350 NimBLE host expects an ESP32-C6
+  controller-only HCI UART firmware, not the stock WiFiNINA/AirLift firmware,
+  and advertising is still under investigation.
+
+Useful local commands:
+
+```sh
+PATH="/Users/fred/Documents/Code/PebbleRP2350/.venv/bin:/Users/fred/.pico-sdk/toolchain/14_2_Rel1/bin:$PATH" .venv/bin/python ./pbl configure --board fruitjam_rp2350
+PATH="/Users/fred/Documents/Code/PebbleRP2350/.venv/bin:/Users/fred/.pico-sdk/toolchain/14_2_Rel1/bin:$PATH" .venv/bin/python ./pbl build
+hardware_tests/fruitjam_memory_lcd/build/_deps/picotool-build/picotool uf2 convert build/src/fw/tintin_fw.elf build/src/fw/tintin_fw.uf2 --platform rp2350 --abs-block
+.venv/bin/python tools/fruitjam_pack_uf2.py
+```
+
+Detailed hardware notes, wiring, hashes, caveats, and debug commands live in
+[`docs/fruitjam_rp2350_port_status.md`](docs/fruitjam_rp2350_port_status.md).
+
 ## Resources
 
 Here's a quick summary of resources to help you find your way around:

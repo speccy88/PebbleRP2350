@@ -6,6 +6,8 @@ use = ['fw_includes', 'pbl_includes']
 
 if bld.env.CONFIG_WATCHDOG_QEMU:
     sources.append('../stubs/watchdog.c')
+elif bld.env.CONFIG_WATCHDOG_STUB:
+    sources.append('../stubs/watchdog.c')
 elif bld.env.CONFIG_WATCHDOG_NRF5:
     sources.append('nrf5.c')
     use.append('hal_nordic')

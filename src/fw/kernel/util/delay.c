@@ -30,7 +30,7 @@ void NOINLINE delay_us(uint32_t us) {
 void delay_init(void) {
 }
 
-#elif defined(CONFIG_QEMU)
+#elif defined(CONFIG_QEMU) || defined(CONFIG_SOC_RP2350)
 #include <cmsis_core.h>
 
 void NOINLINE delay_us(uint32_t us) {

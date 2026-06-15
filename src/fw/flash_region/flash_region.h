@@ -12,6 +12,8 @@
 #include "flash_region_gd25lq255e.h"
 #elif defined(CONFIG_FLASH_GD25Q256E)
 #include "flash_region_gd25q256e.h"
+#elif defined(CONFIG_FLASH_RP2350_XIP)
+#include "flash_region_rp2350_xip.h"
 #endif
 
 #ifdef CONFIG_PBLBOOT

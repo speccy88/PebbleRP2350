@@ -70,6 +70,18 @@ elif bld.env.CONFIG_BOARD_QEMU_GABBRO:
             'drivers',
         ],
     )
+elif bld.env.CONFIG_BOARD_FRUITJAM_RP2350:
+    bld.objects(
+        name='board',
+        source=[
+            'boards/board_fruitjam_rp2350.c',
+        ],
+        use=[
+            'fw_includes',
+            'freertos',
+            'drivers',
+        ],
+    )
 else:
     bld.fatal('src/fw/board/wscript_build: Unknown board {}'.format(bld.env.BOARD))
 

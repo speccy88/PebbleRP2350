@@ -23,6 +23,11 @@ config FLASH_QEMU
     help
       Support for the QEMU external flash peripheral.
 
+config FLASH_RP2350_XIP
+    bool "RP2350 XIP Flash"
+    help
+      Support for RP2350 memory-mapped flash.
+
 module = DRIVER_FLASH
 module-str = Flash
 source "src/fw/Kconfig.template.log_level"

@@ -78,6 +78,32 @@
 #include "applib/ui/ui.h"
 #include "applib/ui/window_stack_private.h"
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_bootsel.h"
+#include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
+#include "soc/rp2350/rp2350/fruitjam_usb_debug.h"
+#define FRUITJAM_BOOT_PROGRESS_SHOW(stage) fruitjam_boot_progress_show(stage)
+#define FRUITJAM_BOOT_PROGRESS_SHOW_LABEL(stage, label) \
+  fruitjam_boot_progress_show_label((stage), (label))
+#define FRUITJAM_BOOT_PROGRESS_WRITE(stage) fruitjam_boot_progress_write_frame(stage)
+#define FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(stage, label) \
+  fruitjam_boot_progress_write_label((stage), (label))
+#define FRUITJAM_BOOT_PROGRESS_MARK(stage) fruitjam_boot_progress_mark(stage)
+#define FRUITJAM_BOOT_PROGRESS_MARK_LABEL(stage, label) \
+  fruitjam_boot_progress_mark_label((stage), (label))
+#define FRUITJAM_BOOTSEL_CLEAR_BOOT_LOOP_STRIKES() fruitjam_bootsel_clear_boot_loop_strikes()
+#define FRUITJAM_USB_DEBUG_INIT() fruitjam_usb_debug_init()
+#else
+#define FRUITJAM_BOOT_PROGRESS_SHOW(stage) ((void)0)
+#define FRUITJAM_BOOT_PROGRESS_SHOW_LABEL(stage, label) ((void)0)
+#define FRUITJAM_BOOT_PROGRESS_WRITE(stage) ((void)0)
+#define FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(stage, label) ((void)0)
+#define FRUITJAM_BOOT_PROGRESS_MARK(stage) ((void)0)
+#define FRUITJAM_BOOT_PROGRESS_MARK_LABEL(stage, label) ((void)0)
+#define FRUITJAM_BOOTSEL_CLEAR_BOOT_LOOP_STRIKES() ((void)0)
+#define FRUITJAM_USB_DEBUG_INIT() ((void)0)
+#endif
+
 #include "console/serial_console.h"
 #include "system/bootbits.h"
 #include "system/logging.h"
@@ -162,21 +188,31 @@ static void dump_gpio_configuration_state(void) {
 int main(void) {
   soc_early_init();
 
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "01 VTOR");
   extern void * __ISR_VECTOR_TABLE__;  // Defined in linker script
   SCB->VTOR = (uint32_t)&__ISR_VECTOR_TABLE__;
 
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "02 NVIC");
   NVIC_SetPriorityGrouping(3); // 4 bits for group priority; 0 bits for subpriority
 
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "03 FAULT");
   enable_fault_handlers();
 
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "04 HEAP");
   kernel_heap_init();
 
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "05 MBUF");
   mbuf_init();
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "06 DELAY");
   delay_init();
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "07 DBG");
   dbgserial_init();
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "08 PULSE");
   pulse_early_init();
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "09 LOG");
   print_splash_screen();
 
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "10 RTC");
   rtc_init();
 
 #ifdef CONFIG_RECOVERY_FW
@@ -198,15 +234,21 @@ int main(void) {
                                           + (uint32_t)__stack_guard_size__)
   };
 
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "11 TASK");
   pebble_task_create(PebbleTask_KernelMain, &task_params, NULL);
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "12 USBQ");
+  FRUITJAM_USB_DEBUG_INIT();
 
   // Always start the firmware in a state where we explicitly do not allow stop mode.
   // FIXME: This seems overly cautious to me, we shouldn't have to do this.
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "13 STOP");
   stop_mode_disable(InhibitorMain);
 
   // Turn off power to internal flash when in stop mode
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "14 PWR");
   pwr_flash_power_down_stop_mode(true /* power_down */);
 
+  FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "15 SCHED");
   vTaskStartScheduler();
   for(;;);
 }
@@ -221,59 +263,82 @@ static void register_system_timers(void) {
 }
 
 static void init_drivers(void) {
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D00 BOARD");
   board_init();
 
   // The dbgserial input support requires timer support, so it is initialized here, much later
   // than the core dbgserial_init().
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D01 DBGIN");
   dbgserial_input_init();
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D02 SERCON");
   serial_console_init();
 
 #ifdef HAS_DRIVER_VOLTAGE_MONITOR
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D03 VMON");
   voltage_monitor_init();
 #endif
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D04 BATT");
   battery_init();
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D05 VIBE");
   vibe_init();
 
 #ifdef CONFIG_PMIC
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D06 PMIC");
   pmic_init();
 #endif
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D07 FLASH");
   flash_init();
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D08 FLSLP");
   flash_sleep_when_idle(true);
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D09 FLWP");
   flash_enable_write_protection();
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D10 FLPRF");
   flash_prf_set_protection(true);
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D11 MFG");
   uint8_t vibe_cali = mfg_info_get_vibe_cali();
   if (vibe_cali != MFG_INFO_VIBE_CALI_INVALID) {
     vibe_apply_calibration(vibe_cali);
   }
 
 #ifdef CONFIG_MIC
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D12 MIC");
   mic_init(MIC);
 #endif
 
 #ifdef CONFIG_TOUCH
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D13 TOUCH");
   touch_sensor_init();
 #endif
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D14 ACCEL");
   accel_init();
 #ifdef CONFIG_MAG
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D15 MAG");
   mag_init();
 #endif
 #ifdef CONFIG_PRESSURE
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D16 PRESS");
   pressure_init();
 #endif
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D17 BLIGHT");
   backlight_init();
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D18 ALS");
   ambient_light_init();
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D19 TEMP");
   temperature_init();
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D20 RTCTMR");
   rtc_init_timers();
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D21 RTCALM");
   rtc_alarm_init();
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageDriversStart, "D22 PWRTRK");
   power_tracking_init();
 }
 
@@ -296,6 +361,7 @@ static void prv_low_power_debug_config_callback(void* data) {
 }
 
 static NOINLINE void prv_main_task_init(void) {
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStagePfsDone, "16 KMAIN");
   // The Snowy bootloader does not clear the watchdog flag itself. Clear the
   // flag ourselves so that a future safe reset does not look like a watchdog
   // reset to the bootloader.
@@ -309,12 +375,17 @@ static NOINLINE void prv_main_task_init(void) {
 
   pebble_task_configure_idle_task();
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStagePfsDone, "17 TINIT");
   task_init();
+  FRUITJAM_USB_DEBUG_INIT();
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStagePfsDone, "18 MPU");
   memory_layout_setup_mpu();
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStagePfsDone, "19 BOARD");
   board_early_init();
 
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStagePfsDone, "20 SPLASH");
   boot_splash_start();
 
   kernel_applib_init();
@@ -341,7 +412,9 @@ static NOINLINE void prv_main_task_init(void) {
   register_system_timers();
   system_task_timer_init();
 
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageDriversStart);
   init_drivers();
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageDriversDone);
 
   clock_init();
 
@@ -371,9 +444,11 @@ static NOINLINE void prv_main_task_init(void) {
 
   // When there are new system resources waiting to be installed, this call
   // will actually install them:
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageResourcesStart);
   resource_init();
 
   system_resource_init();
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageResourcesDone);
 
 #ifdef CONFIG_HRM
   hrm_init(HRM);
@@ -384,16 +459,23 @@ static NOINLINE void prv_main_task_init(void) {
   // not programmed when we attempt to initialize bluetooth, it prevents the
   // clock from reaching the bluetooth module and initialization fails.
   display_init();
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageDriverReady);
 
   // Stop boot splash before initializing compositor
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageCompositorStart);
   boot_splash_stop();
   // Can't use the compositor framebuffer until the compositor is initialized
   compositor_init();
   kernel_ui_init();
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageCompositorDone);
 
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageBluetoothInitStart);
   bt_driver_init();
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageBluetoothInitDone);
 
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageServicesStart);
   services_init();
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageServicesDone);
 
   // The RTC needs be calibrated after the mfg registry service has been initialized so we can
   // load the measured frequency.
@@ -436,5 +518,7 @@ static NOINLINE void prv_main_task_init(void) {
 
 static void main_task(void *parameter) {
   prv_main_task_init();
+  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageLauncherReady);
+  FRUITJAM_BOOTSEL_CLEAR_BOOT_LOOP_STRIKES();
   launcher_main_loop();
 }

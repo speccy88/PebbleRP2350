@@ -64,6 +64,9 @@ static uint32_t s_pause_ticks_remaining = 0;
 #elif defined(CONFIG_SOC_SF32LB52)
 #define WATCHDOG_FREERTOS_IRQn        USART5_IRQn
 #define WATCHDOG_FREERTOS_IRQHandler  USART5_IRQHandler
+#elif defined(CONFIG_SOC_RP2350)
+#define WATCHDOG_FREERTOS_IRQn        SIO_IRQ_BELL_IRQn
+#define WATCHDOG_FREERTOS_IRQHandler  SIO_IRQ_BELL_IRQHandler
 #elif defined(CONFIG_QEMU)
 #define WATCHDOG_FREERTOS_IRQn        WATCHDOG_IRQn
 #define WATCHDOG_FREERTOS_IRQHandler  WATCHDOG_IRQHandler

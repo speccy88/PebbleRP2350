@@ -3,6 +3,8 @@
 
 #include "pbl/services/filesystem/flash_translation.h"
 
+#include <stdio.h>
+
 #include "drivers/flash.h"
 #include "drivers/task_watchdog.h"
 #include "flash_region/filesystem_regions.h"
@@ -12,6 +14,14 @@
 #include "system/passert.h"
 #include "util/math.h"
 #include "util/size.h"
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
+#define FRUITJAM_FTL_MARK(label) \
+  fruitjam_boot_progress_mark_label(FruitJamBootProgressStagePfsStart, (label))
+#else
+#define FRUITJAM_FTL_MARK(label) ((void)0)
+#endif
 
 PBL_LOG_MODULE_DECLARE(service_filesystem, CONFIG_SERVICE_FILESYSTEM_LOG_LEVEL);
 
@@ -41,6 +51,7 @@ static uint32_t prv_region_size(int idx) {
 static void prv_layout_version_add_all_regions(bool revert) {
   static unsigned int original_idx;
 
+  FRUITJAM_FTL_MARK(revert ? "FTL REVERT" : "FTL ALL");
   if (!revert) {
     original_idx = s_next_region_idx;
     s_next_region_idx = TOTAL_NUM_FLASH_REGIONS;
@@ -56,10 +67,12 @@ static void prv_layout_version_add_all_regions(bool revert) {
 
   PBL_LOG_DBG("Filesystem: Temporary size - %"PRId32" Kb", (s_ftl_size / 1024));
   pfs_set_size(s_ftl_size, false /* don't erase regions */);
+  FRUITJAM_FTL_MARK(revert ? "FTL REV OK" : "FTL ALL OK");
 }
 
 //! return a layout version that associates with the labels from above
 static uint8_t prv_ftl_get_layout_version(void) {
+  FRUITJAM_FTL_MARK("FTL VER");
   // add all regions so PFS can know about them temporarily
   prv_layout_version_add_all_regions(false);
 
@@ -69,6 +82,11 @@ static uint8_t prv_ftl_get_layout_version(void) {
   // iterate through all regions idx > 0 and see if PFS is active in the regions. If yes, increment
   // flash version.
   for (uint8_t i = flash_version; i < TOTAL_NUM_FLASH_REGIONS; i++) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    char label[16];
+    snprintf(label, sizeof(label), "FTL ACT %u", (unsigned)i);
+    FRUITJAM_FTL_MARK(label);
+#endif
     if ((prv_region_size(i) == 0) ||
          pfs_active_in_region(known_size, known_size + prv_region_size(i))) {
       // if active, increment known flash version and increase size to check next region
@@ -83,10 +101,12 @@ static uint8_t prv_ftl_get_layout_version(void) {
   // go back to the state we were in before the function
   prv_layout_version_add_all_regions(true);
 
+  FRUITJAM_FTL_MARK("FTL VER OK");
   return flash_version;
 }
 
 void ftl_add_region(uint32_t region_start, uint32_t region_end, bool erase_new_region) {
+  FRUITJAM_FTL_MARK("FTL ADD");
   // check if this region equals the next region, if so, then add next region
   if ((region_start == s_region_list[s_next_region_idx].start) &&
       (region_end == s_region_list[s_next_region_idx].end) &&
@@ -101,19 +121,24 @@ void ftl_add_region(uint32_t region_start, uint32_t region_end, bool erase_new_r
 
   // erase if asked to
   if (erase_new_region) {
+    FRUITJAM_FTL_MARK("FTL ERASE");
     flash_region_erase_optimal_range_no_watchdog(region_start, region_start,
                                                  region_end, region_end);
+    FRUITJAM_FTL_MARK("FTL ER OK");
   }
 
   s_ftl_size += (region_end - region_start);
 
   // call back to PFS to make sure it realizes there is more space to place files.
   pfs_set_size(s_ftl_size, erase_new_region);
+  FRUITJAM_FTL_MARK("FTL ADD OK");
 }
 
 void ftl_populate_region_list(void) {
+  FRUITJAM_FTL_MARK("FTL POP");
   uint8_t flash_layout_version = prv_ftl_get_layout_version();
   PBL_LOG_INFO("Filesystem: Old Flash Layout Version: %u", flash_layout_version);
+  FRUITJAM_FTL_MARK("FTL LAYOUT");
 
   for (unsigned int i = s_next_region_idx; i < flash_layout_version; i++) {
     ftl_add_region(s_region_list[i].start, s_region_list[i].end, false);
@@ -121,12 +146,15 @@ void ftl_populate_region_list(void) {
 
   // at this point we have found all the regions that already exist on the flash
   // so run our cleanup logic in case we rebooted during a filesystem operation
+  FRUITJAM_FTL_MARK("FTL CLEAN");
   pfs_reboot_cleanup();
 
   for (unsigned int i = s_next_region_idx; i < TOTAL_NUM_FLASH_REGIONS; i++) {
+    FRUITJAM_FTL_MARK("FTL NEW");
     ftl_add_region(s_region_list[i].start, s_region_list[i].end, true);
   }
 
+  FRUITJAM_FTL_MARK("FTL DONE");
   PBL_LOG_DBG("Filesystem: New size - %"PRId32" Kb", (s_ftl_size / 1024));
 }
 

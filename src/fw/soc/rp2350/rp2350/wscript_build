@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Core Devices LLC
+# SPDX-License-Identifier: Apache-2.0
+
+import os
+
+pico_sdk = os.environ.get('PICO_SDK_PATH',
+                          os.path.expanduser('~/.pico-sdk/sdk/2.1.1'))
+tinyusb = os.path.join(pico_sdk, 'lib/tinyusb')
+
+
+def root_node(path):
+    return bld.root.find_node(os.path.normpath(path).lstrip(os.sep))
+
+
+bld.objects(
+    name='soc',
+    source=[
+        'fruitjam_bootsel.c',
+        'fruitjam_boot_progress.c',
+        'fruitjam_esp.c',
+        'fruitjam_lcd.c',
+        'fruitjam_usb_debug.c',
+        'fruitjam_usb_descriptors.c',
+        'init.c',
+        'picobin.S',
+        root_node(os.path.join(tinyusb, 'src/class/cdc/cdc_device.c')),
+        root_node(os.path.join(tinyusb, 'src/common/tusb_fifo.c')),
+        root_node(os.path.join(tinyusb, 'src/device/usbd.c')),
+        root_node(os.path.join(tinyusb, 'src/device/usbd_control.c')),
+        root_node(os.path.join(tinyusb, 'src/portable/raspberrypi/rp2040/dcd_rp2040.c')),
+        root_node(os.path.join(tinyusb, 'src/portable/raspberrypi/rp2040/rp2040_usb.c')),
+        root_node(os.path.join(tinyusb, 'src/tusb.c')),
+    ],
+    includes=[
+        '.',
+        os.path.join(tinyusb, 'src'),
+        os.path.join(tinyusb, 'src/portable/raspberrypi/rp2040'),
+        os.path.join(pico_sdk, 'src/common/pico_base_headers/include'),
+        os.path.join(pico_sdk, 'src/rp2350/hardware_regs/include'),
+        os.path.join(pico_sdk, 'src/rp2350/hardware_structs/include'),
+        os.path.join(pico_sdk, 'src/rp2350/pico_platform/include'),
+        os.path.join(pico_sdk, 'src/rp2_common/hardware_base/include'),
+    ],
+    use=[
+        'fw_includes',
+    ],
+)

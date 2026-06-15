@@ -19,6 +19,11 @@ config GPIO_SF32LB
     help
       Support for the SiFli SF32LB GPIO controller.
 
+config GPIO_RP2350
+    bool "Raspberry Pi RP2350"
+    help
+      Support for the RP2350 GPIO controller.
+
 config GPIO_QEMU
     bool "QEMU GPIO"
     help

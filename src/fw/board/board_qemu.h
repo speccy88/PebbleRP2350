@@ -143,6 +143,8 @@ typedef struct {
   ExtiConfig pmic_int;
   const uint8_t low_power_threshold;
   const uint16_t battery_capacity_hours;
+  //! Board is powered from a fixed supply and has no battery policy.
+  const bool fixed_power;
 } BoardConfigPower;
 
 typedef enum {

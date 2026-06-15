@@ -4,6 +4,7 @@
 #include "kernel/low_power.h"
 
 #include "apps/prf/low_power.h"
+#include "board/board.h"
 #include "drivers/rtc.h"
 #include "kernel/event_loop.h"
 #include "kernel/ui/modals/modal_manager.h"
@@ -77,6 +78,10 @@ void low_power_standby(void) {
 }
 
 void low_power_enter(void) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return;
+  }
+
 #ifdef CONFIG_RECOVERY_FW
   if (mfg_is_mfg_mode()) {
     return;
@@ -86,9 +91,19 @@ void low_power_enter(void) {
 }
 
 void low_power_exit(void) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    s_low_power_active = false;
+    s_prev_low_power_active = false;
+    return;
+  }
+
   prv_low_power_transition(false);
 }
 
 bool low_power_is_active(void) {
+  if (BOARD_CONFIG_POWER.fixed_power) {
+    return false;
+  }
+
   return s_low_power_active;
 }

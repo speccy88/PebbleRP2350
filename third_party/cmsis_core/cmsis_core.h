@@ -16,6 +16,8 @@
 #pragma GCC diagnostic pop
 #elif defined(CONFIG_SOC_SF32LB52)
 #include <bf0_hal.h>
+#elif defined(CONFIG_SOC_RP2350)
+#include "pebble/rp2350.h"
 #else
 #error "Unknown or missing MICRO_FAMILY_* define"
 #endif
