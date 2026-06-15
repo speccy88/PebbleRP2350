@@ -3,6 +3,7 @@
 
 #include "drivers/button.h"
 #include "drivers/debounced_button.h"
+#include "drivers/rp2350/button.h"
 
 #include "board/board.h"
 #include "console/prompt.h"
@@ -52,6 +53,10 @@
 
 static bool s_rotated_180;
 static TaskHandle_t s_button_task;
+static volatile FruitJamButtonDebugSnapshot s_debug_snapshot = {
+    .pending_button = NUM_BUTTONS,
+    .last_event_button = NUM_BUTTONS,
+};
 
 typedef struct ButtonSynthState {
   uint32_t debounced_physical_state;
@@ -206,6 +211,10 @@ uint8_t button_get_state_bits(void) {
 }
 
 static void prv_emit_button_event(ButtonId id, bool is_pressed) {
+  s_debug_snapshot.event_count++;
+  s_debug_snapshot.last_event_button = id;
+  s_debug_snapshot.last_event_down = is_pressed;
+
   PebbleEvent event = {
       .type = is_pressed ? PEBBLE_BUTTON_DOWN_EVENT : PEBBLE_BUTTON_UP_EVENT,
       .button.button_id = id,
@@ -334,6 +343,20 @@ static void prv_suppress_all_button_events(ButtonSynthState *state) {
   state->suppress_until_release_mask = state->debounced_physical_state & DOWN_COMBO_MASK;
 }
 
+static void prv_update_debug_snapshot(const ButtonSynthState *state, uint8_t raw_state,
+                                      uint32_t bootsel_hold_samples) {
+  s_debug_snapshot.raw_physical_state = raw_state;
+  s_debug_snapshot.debounced_physical_state = state->debounced_physical_state;
+  s_debug_snapshot.emitted_state = state->emitted_state;
+  s_debug_snapshot.suppress_until_release_mask = state->suppress_until_release_mask;
+  s_debug_snapshot.pending_button = state->pending_button;
+  s_debug_snapshot.pending_samples = state->pending_samples;
+  s_debug_snapshot.bootsel_hold_samples = bootsel_hold_samples;
+  s_debug_snapshot.down_combo_active =
+      (state->debounced_physical_state & DOWN_COMBO_MASK) == DOWN_COMBO_MASK;
+  s_debug_snapshot.rotated_180 = s_rotated_180;
+}
+
 static void prv_button_task(void *data) {
   (void)data;
 
@@ -341,14 +364,19 @@ static void prv_button_task(void *data) {
       .debounced_physical_state = prv_physical_state_bits(),
       .pending_button = NUM_BUTTONS,
   };
+  uint8_t raw_state = prv_physical_state_bits();
   uint32_t counters[NUM_BUTTONS] = {0};
   uint32_t bootsel_hold_samples = 0;
+
+  prv_update_debug_snapshot(&synth_state, raw_state, bootsel_hold_samples);
 
   while (true) {
     if (prv_all_physical_buttons_pressed()) {
       bootsel_hold_samples++;
       prv_reset_debounce_counters(counters);
       prv_suppress_all_button_events(&synth_state);
+      raw_state = prv_physical_state_bits();
+      prv_update_debug_snapshot(&synth_state, raw_state, bootsel_hold_samples);
       if (bootsel_hold_samples >= BOOTSEL_HOLD_SAMPLES) {
         fruitjam_bootsel_enter();
       }
@@ -357,7 +385,7 @@ static void prv_button_task(void *data) {
     }
 
     bootsel_hold_samples = 0U;
-    const uint8_t raw_state = prv_physical_state_bits();
+    raw_state = prv_physical_state_bits();
 
     for (ButtonId id = BUTTON_ID_BACK; id < NUM_BUTTONS; ++id) {
       if (id == BUTTON_ID_DOWN) {
@@ -384,9 +412,18 @@ static void prv_button_task(void *data) {
     }
 
     prv_update_synthetic_buttons(&synth_state);
+    prv_update_debug_snapshot(&synth_state, raw_state, bootsel_hold_samples);
 
     vTaskDelay(pdMS_TO_TICKS(POLL_PERIOD_MS));
   }
+}
+
+void button_debug_get_snapshot(FruitJamButtonDebugSnapshot *snapshot) {
+  if (!snapshot) {
+    return;
+  }
+
+  *snapshot = s_debug_snapshot;
 }
 
 void debounced_button_init(void) {

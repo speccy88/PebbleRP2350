@@ -4,6 +4,8 @@
 #include "soc/rp2350/rp2350/fruitjam_usb_debug.h"
 
 #include "hardware/resets.h"
+#include "drivers/button.h"
+#include "drivers/rp2350/button.h"
 #include "soc/rp2350/rp2350/fruitjam_bootsel.h"
 #include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
 #include "soc/rp2350/rp2350/fruitjam_bt_debug.h"
@@ -311,6 +313,71 @@ static void prv_send_tasks(void) {
   }
 }
 
+static char prv_button_state_char(uint32_t state, ButtonId id) {
+  return (state & (1U << id)) ? '1' : '0';
+}
+
+static const char *prv_button_name(ButtonId id) {
+  switch (id) {
+    case BUTTON_ID_BACK:
+      return "back";
+    case BUTTON_ID_UP:
+      return "up";
+    case BUTTON_ID_SELECT:
+      return "select";
+    case BUTTON_ID_DOWN:
+      return "down";
+    case NUM_BUTTONS:
+      return "none";
+  }
+
+  return "?";
+}
+
+static void prv_send_buttons(void) {
+  FruitJamButtonDebugSnapshot snapshot;
+  char line[192];
+
+  button_debug_get_snapshot(&snapshot);
+  const uint32_t live_state = button_get_state_bits();
+
+  int written = snprintf(
+      line, sizeof(line),
+      "buttons raw=%c%c%c%c debounced=%c%c%c%c emitted=%c%c%c%c live=%c%c%c%c combo=%u"
+      " rotated=%u\r\n",
+      prv_button_state_char(snapshot.raw_physical_state, BUTTON_ID_BACK),
+      prv_button_state_char(snapshot.raw_physical_state, BUTTON_ID_UP),
+      prv_button_state_char(snapshot.raw_physical_state, BUTTON_ID_SELECT),
+      prv_button_state_char(snapshot.raw_physical_state, BUTTON_ID_DOWN),
+      prv_button_state_char(snapshot.debounced_physical_state, BUTTON_ID_BACK),
+      prv_button_state_char(snapshot.debounced_physical_state, BUTTON_ID_UP),
+      prv_button_state_char(snapshot.debounced_physical_state, BUTTON_ID_SELECT),
+      prv_button_state_char(snapshot.debounced_physical_state, BUTTON_ID_DOWN),
+      prv_button_state_char(snapshot.emitted_state, BUTTON_ID_BACK),
+      prv_button_state_char(snapshot.emitted_state, BUTTON_ID_UP),
+      prv_button_state_char(snapshot.emitted_state, BUTTON_ID_SELECT),
+      prv_button_state_char(snapshot.emitted_state, BUTTON_ID_DOWN),
+      prv_button_state_char(live_state, BUTTON_ID_BACK),
+      prv_button_state_char(live_state, BUTTON_ID_UP),
+      prv_button_state_char(live_state, BUTTON_ID_SELECT),
+      prv_button_state_char(live_state, BUTTON_ID_DOWN),
+      snapshot.down_combo_active ? 1U : 0U, snapshot.rotated_180 ? 1U : 0U);
+  prv_usb_write_formatted_line(line, written, sizeof(line));
+
+  written = snprintf(line, sizeof(line),
+                     "buttons pending=%s samples=%" PRIu32 " suppress=%c%c%c%c"
+                     " bootsel=%" PRIu32 " events=%" PRIu32 " last=%s:%s\r\n",
+                     prv_button_name(snapshot.pending_button), snapshot.pending_samples,
+                     prv_button_state_char(snapshot.suppress_until_release_mask, BUTTON_ID_BACK),
+                     prv_button_state_char(snapshot.suppress_until_release_mask, BUTTON_ID_UP),
+                     prv_button_state_char(snapshot.suppress_until_release_mask, BUTTON_ID_SELECT),
+                     prv_button_state_char(snapshot.suppress_until_release_mask, BUTTON_ID_DOWN),
+                     snapshot.bootsel_hold_samples, snapshot.event_count,
+                     prv_button_name(snapshot.last_event_button),
+                     snapshot.last_event_down ? "down" : "up");
+  prv_usb_write_formatted_line(line, written, sizeof(line));
+}
+
 static void prv_append_hex_bytes(char *out, const uint8_t *data, uint8_t length);
 static void prv_append_hci_cmd_history(char *out, size_t out_size,
                                        const FruitJamEspHciDebugSnapshot *snapshot);
@@ -581,13 +648,16 @@ static void prv_enter_esp_passthrough(void) {
 static void prv_handle_command(const char *command) {
   if (strcmp(command, "help") == 0) {
     prv_usb_write_str(
-        "commands: help ping progress tasks esp bt reason frame clearfault reset bootsel esppass\r\n");
+        "commands: help ping progress tasks buttons esp bt reason frame clearfault reset bootsel "
+        "esppass\r\n");
   } else if (strcmp(command, "ping") == 0) {
     prv_usb_write_str("pong\r\n");
   } else if (strcmp(command, "progress") == 0) {
     prv_send_progress();
   } else if (strcmp(command, "tasks") == 0) {
     prv_send_tasks();
+  } else if (strcmp(command, "buttons") == 0) {
+    prv_send_buttons();
   } else if (strcmp(command, "esp") == 0) {
     prv_send_esp();
   } else if (strcmp(command, "bt") == 0) {

@@ -43,7 +43,7 @@ Current hardware-verified behavior:
 USB CDC debug commands:
 
 ```text
-help ping progress tasks esp bt reason frame clearfault reset bootsel esppass
+help ping progress tasks buttons esp bt reason frame clearfault reset bootsel esppass
 ```
 
 Bluetooth state:
@@ -354,9 +354,9 @@ The Fruit Jam target includes:
 - Fruit Jam USB CDC debug helper at
   `src/fw/soc/rp2350/rp2350/fruitjam_usb_debug.c`. It uses TinyUSB CDC, mirrors
   `dbgserial` output after USB init, exposes `help`/`ping`/`reason`/`frame`/
-  `reset`/`bootsel`/`clearfault`/`tasks`/`esp`/`bt`/`esppass`, and programs
-  `PLL_USB`/`clk_usb` with bounded waits so failed USB clock bring-up cannot
-  freeze PebbleOS at the early LCD screen.
+  `reset`/`bootsel`/`clearfault`/`tasks`/`buttons`/`esp`/`bt`/`esppass`, and
+  programs `PLL_USB`/`clk_usb` with bounded waits so failed USB clock bring-up
+  cannot freeze PebbleOS at the early LCD screen.
 - LCD framebuffer capture shadowing in
   `src/fw/soc/rp2350/rp2350/fruitjam_lcd.c`. It records the last rows sent by
   the firmware to the Sharp Memory LCD; it is not an electrical readback from
@@ -374,6 +374,10 @@ The Fruit Jam target includes:
   enters BOOTSEL through the RP2350 boot ROM. While all three physical buttons
   are held, ordinary Pebble button events are suppressed so the recovery chord
   is not also delivered as Back+Down to the UI.
+  The CDC `buttons` command reports raw physical GPIO state, debounced physical
+  state, emitted Pebble button state, the live `button_get_state_bits()` result,
+  pending chord-delay state, BOOTSEL hold samples, and the last emitted button
+  event so this mapping can be verified remotely.
 - Fruit Jam ESP32-C6 HCI helper at `src/fw/soc/rp2350/rp2350/fruitjam_esp.c`.
   It uses UART1 on GPIO8/GPIO9, ESP_CS GPIO46, ESP_BUSY GPIO3,
   ESP_RESET/PERIPH_RESET GPIO22, and ESP_IRQ/GPIO0/RTS GPIO23. ESP_BUSY is
@@ -427,7 +431,9 @@ Remaining work before it is useful on hardware:
 - The button driver is present, but has not been tested under PebbleOS on
   hardware yet. It polls GPIOs, debounces in a FreeRTOS task, maps Up+Select to
   Pebble Down with a short chord grace window, and includes the all-buttons
-  BOOTSEL escape.
+  BOOTSEL escape. The CDC `buttons` command now exposes enough raw/debounced/
+  emitted state to verify the mapping without relying only on visible UI
+  movement.
 - Hardware-verify the experimental SPI1 LCD path if it is needed for refresh
   speed. The stable Fruit Jam build leaves SPI1 disabled for now.
 - Hardware-verify debug UART output on GPIO44 TX / GPIO45 RX at 230400 baud.
