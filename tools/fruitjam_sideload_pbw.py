@@ -13,6 +13,8 @@ import termios
 import time
 import zipfile
 
+LAUNCHER_INSTALL_ID = -54
+
 
 def find_port() -> str:
     ports = sorted(glob.glob("/dev/cu.usbmodem*"))
@@ -114,7 +116,13 @@ class CdcSession:
         raise TimeoutError(f"Timed out waiting for {expected_prefix!r}; recent={recent!r}")
 
 
-def read_pbw_payload(path: str, platform: str) -> tuple[bytes, bytes, str | None]:
+def normalize_uuid(uuid: str | None) -> str | None:
+    if not uuid:
+        return None
+    return uuid.strip().strip("{}").lower()
+
+
+def read_pbw_payload(path: str, platform: str) -> tuple[bytes, bytes, str | None, bool]:
     with zipfile.ZipFile(path) as zf:
         app_name = f"{platform}/pebble-app.bin"
         res_name = f"{platform}/app_resources.pbpack"
@@ -132,7 +140,11 @@ def read_pbw_payload(path: str, platform: str) -> tuple[bytes, bytes, str | None
             raw_uuid = appinfo.get("uuid")
             if isinstance(raw_uuid, str):
                 uuid = raw_uuid
-        return zf.read(app_name), zf.read(res_name), uuid
+            watchapp = appinfo.get("watchapp")
+            watchface = bool(isinstance(watchapp, dict) and watchapp.get("watchface"))
+        else:
+            watchface = False
+        return zf.read(app_name), zf.read(res_name), uuid, watchface
 
 
 def stream_part(session: CdcSession, name: str, data: bytes, chunk_size: int) -> None:
@@ -142,6 +154,21 @@ def stream_part(session: CdcSession, name: str, data: bytes, chunk_size: int) ->
                                    f"appsideload {name}=")
         if f"/{len(data)}" not in response:
             print(response)
+
+
+def maybe_leave_running_app(session: CdcSession, pbw_uuid: str | None) -> None:
+    normalized_pbw_uuid = normalize_uuid(pbw_uuid)
+    if not normalized_pbw_uuid:
+        return
+
+    response = session.command("appcur", "appcur ")
+    match = re.search(r"uuid=(\{?[0-9a-fA-F-]{36}\}?)", response)
+    if not match or normalize_uuid(match.group(1)) != normalized_pbw_uuid:
+        return
+
+    print(f"current app matches PBW UUID; launching system launcher {LAUNCHER_INSTALL_ID} first")
+    print(session.command(f"applaunch {LAUNCHER_INSTALL_ID}", "applaunch "))
+    time.sleep(1.0)
 
 
 def main() -> int:
@@ -157,8 +184,10 @@ def main() -> int:
     if args.chunk_size <= 0 or args.chunk_size > 80:
         raise SystemExit("--chunk-size must be between 1 and 80")
 
-    app, resources, uuid = read_pbw_payload(args.pbw, args.platform)
+    app, resources, uuid, watchface = read_pbw_payload(args.pbw, args.platform)
     with CdcSession(args.port or find_port(), args.timeout) as session:
+        maybe_leave_running_app(session, uuid)
+
         begin = f"appsideload begin {len(app)} {len(resources)}"
         if uuid:
             begin += f" {uuid}"
@@ -171,9 +200,10 @@ def main() -> int:
         match = re.search(r"id=(-?\d+)", done)
         if args.launch and match:
             install_id = match.group(1)
-            session.write_line(f"applaunch {install_id}")
+            if watchface:
+                print(session.command(f"watchdefault {install_id}", "watchdefault "))
+            print(session.command(f"applaunch {install_id}", "applaunch "))
             time.sleep(0.5)
-            print(f"launch requested id={install_id}")
 
     return 0
 

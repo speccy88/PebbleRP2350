@@ -1,6 +1,6 @@
 # Fruit Jam RP2350 Port Status
 
-Date: 2026-06-15
+Date: 2026-06-16
 
 ## Current Snapshot
 
@@ -13,9 +13,7 @@ Latest packaged Fruit Jam RP2350 UF2:
 - Path after configuring `fruitjam_rp2350`:
   `build/src/fw/tintin_fw_with_resources.uf2`. Rebuild/repack Fruit Jam before
   reusing this path if the last local build selected another board profile.
-- Release tag: previous public preview
-  `v9.9.9-fruitjam-rp2350-preview-20260614`; the current local rebuild is not
-  a new release tag.
+- Release tag: `v9.9.9-rp2350-preview-20260616`
 - Size: 3.0 MiB / 3,073,536 bytes
 - Contents: RP2350 PebbleOS firmware plus system resources packed at
   `0x10620000`
@@ -151,6 +149,13 @@ Current hardware-verified behavior:
   reconnect, GATT discovery, PPOGATT session open, and bidirectional Pebble
   Protocol traffic through the Fruit Jam ESP32-C6 controller-only HCI UART
   firmware.
+- 2026-06-16 iOS/Core Devices reconnect verification: after toggling iPhone
+  Bluetooth off/on, the app moved from `Connect` to `Negotiating` in about one
+  second and reached `Connected (Factory)` in about three seconds. CDC evidence
+  showed `connect=2`, `connok=2`, `disconnect=1`, `pair=2`, `encd=1`,
+  `bonded=1`, `gw=1`, GATT discovery `ok=2 services=11`, PPOGATT `st=6`,
+  bidirectional Pebble Protocol traffic, and ESP/HCI counters with no UART drops
+  or transmit timeouts.
 - USB CDC app sideload can install, reinstall, cache, and launch a local
   Flint/Pebble 2 Duo-compatible watchface PBW. The current smoke test installed
   `/tmp/fruitjam_watchface_smoke/build/fruitjam_watchface_smoke.pbw` as
@@ -158,6 +163,15 @@ Current hardware-verified behavior:
   info=0 resources=1`, `appcur` reported `appcur 3 name="Fruit Jam Now" ...
   watchface=1`, and the CDC frame capture at `/tmp/fruitjam_watchface_now.png`
   showed the watchface rendering on the LCD.
+- 2026-06-16 CDC sideload helper evidence: reinstalling the currently running
+  `Fruit Jam Now` PBW now detects the matching app UUID, launches the built-in
+  system launcher first, streams the replacement, sets the watchface as default,
+  and relaunches it. This avoids the stale-running-app case observed when
+  overwriting the active watchface. The verified output included
+  `current app matches PBW UUID; launching system launcher -54 first`,
+  `appsideload done id=3 cache=0 name="Fruit Jam Now"`, `watchdefault queued 3`,
+  and `applaunch queued 3`. A post-reinstall framebuffer capture at
+  `/tmp/fruitjam_sideload_helper_verified.png` showed the relaunched watchface.
 - The app sideload path now sends the PBW UUID from `appinfo.json`, reuses the
   existing install id for UUID reinstalls, and skips `app_db_insert()` on
   same-UUID reinstalls so the normal `APP_UPGRADED` callback does not delete
@@ -238,12 +252,11 @@ Bluetooth state:
   Earlier iPhone pairing evidence reached `pps ... bond=1 enc=1 gw=1`, GATT
   discovery found 11 services, PPOGATT reported `open=1`, and Pebble Protocol
   counters showed bidirectional traffic with no receive-router errors.
-- Current pairing-retry note: after clearing the Fruit Jam-side pairing store,
-  iOS/Core Device still retained stale `Pebble A35A` state and repeatedly
-  connected then disconnected before encryption or PPS/GATT traffic. Board-side
-  evidence showed `connect=5`, `disconnect=5`, `pair=0`, `encd=0`, and HCI
-  disconnect reason `0x0213` (remote user terminated). Remove/forget the phone
-  entry and re-add the watch before retesting the new GATT discovery retry.
+- If iOS falls back into a long `Connecting` / `Negotiating` / `Connecting`
+  loop, first clear stale state on both sides: run CDC `btforget`, forget the
+  watch in iOS Bluetooth/Core Devices, toggle iPhone Bluetooth off/on, then
+  re-add the watch. During the latest clean reconnect, the loop did not
+  reproduce after the phone Bluetooth state was refreshed.
 - Mac BLE smoke-test workflow: `.venv/bin/python tools/macos_ble_probe.py scan
   --timeout 8 --name 'Pebble RP2350'`, then `.venv/bin/python
   tools/macos_ble_probe.py connect --name 'Pebble RP2350'
@@ -466,6 +479,15 @@ Latest local validation:
   rows=168`, and `tasks` included `USBDebug`, `SharpVCOM`, `PULSE`, and
   `App <TicToc>`. CDC frame capture `/tmp/pico2_w_after_sdk_clocks.png`
   showed the TicToc framebuffer.
+- 2026-06-16 live Pico 2 W CDC check on `/dev/cu.usbmodemPICO2WRP23501`:
+  `ping` returned `pong`, `progress` reported `stage=7 label="07 LCD"`,
+  `appcur` reported built-in `TicToc` id `-69`, and a clean CDC frame capture
+  at `/tmp/pico2w_frame_status.png` showed the TicToc framebuffer with
+  `January 1`, as expected for the current Pico setup with no RTC attached.
+  Running `bton` was accepted, but a follow-up `bt` snapshot still showed the
+  Bluetooth driver idle with no advertising payload (`enter=0`, `active=0`,
+  `enabled=0`, `ad_len=0`, `name=""`), confirming this image remains in the
+  intentional CYW43-stub Bluetooth state.
 - 2026-06-15 Fruit Jam rebuild after the shared SDK-style RP2350 clock helper:
   `./pbl configure --board fruitjam_rp2350`, then `./pbl build`; firmware
   797551 / 16777216 bytes, resources 741474 / 2097152 bytes. This was a build
@@ -930,7 +952,9 @@ The Fruit Jam target includes:
   `hardware_tests/fruitjam_esp32c6_hci/`. Build it with ESP-IDF v5.5.4 using
   `idf.py set-target esp32c6`, `idf.py build`, and `idf.py merge-bin`, then
   flash `build/merged-binary.bin` through Adafruit's Fruit Jam serial
-  passthrough UF2.
+  passthrough UF2. Release assets should include both the merged C6 firmware
+  binary and the RP2350 `SerialESPPassthrough.ino.uf2` bridge so the C6 can be
+  restored through the Fruit Jam without an external USB-UART adapter.
 - RP2350 debug UART driver at `src/fw/drivers/uart/rp2350.c`.
 - RP2350 large-segment heap support in `src/libutil/heap.c`; the live kernel
   heap remains internal SRAM only for now.
@@ -965,10 +989,11 @@ HCI transport is implemented inside PebbleOS. The shared RP2350 NimBLE transport
 already has a Pico 2 W backend slot at
 `src/fw/soc/rp2350/rp2350/rp2350_bluetooth_hci_cyw43_stub.c`, and an explicit
 `CONFIG_BT_FW_NIMBLE=y` / `CONFIG_BT_FW_STUB=n` Pico 2 W build now passes
-against that stub. The latest normal Pico 2 W profile build reported
-`FW: 714347 / 16777216 bytes used`; the latest explicit NimBLE/CYW43-stub build
-reported `FW: 786755 / 16777216 bytes used`. The standalone CYW43 HCI probe is
-the first radio bring-up target. A local rebuild on 2026-06-15 was already up to
+against that stub. The 2026-06-16 release-audit normal Pico 2 W profile build
+reported `FW: 717047 / 16777216 bytes used`; the explicit NimBLE/CYW43-stub
+compile-test reported `FW: 790287 / 16777216 bytes used`. The standalone CYW43
+HCI probe is the first radio bring-up target. A local rebuild on 2026-06-15 was
+already up to
 date and produced
 `hardware_tests/pico2_w_rp2350/cyw43_hci_probe/build/pico2_w_cyw43_hci_probe.uf2`,
 683 KiB, SHA-256

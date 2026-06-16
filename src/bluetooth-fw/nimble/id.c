@@ -2,6 +2,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
 #include <bluetooth/id.h>
+#include <pbl/services/bluetooth/local_id.h>
 #include <system/passert.h>
 
 #include <host/ble_hs_id.h>
@@ -23,13 +24,23 @@ void bt_driver_id_copy_local_identity_address(BTDeviceAddress *addr_out) {
   PBL_ASSERTN(rc == 0);
 }
 
-void bt_driver_set_local_address(bool allow_cycling, const BTDeviceAddress *pinned_address) {}
+void bt_driver_set_local_address(bool allow_cycling, const BTDeviceAddress *pinned_address) {
+  BTDeviceAddress address;
+  const BTDeviceAddress *address_to_set = pinned_address;
+
+  if (allow_cycling || !pinned_address) {
+    bt_local_id_generate_address_from_serial(&address);
+    address_to_set = &address;
+  }
+
+  (void)ble_hs_id_set_rnd(address_to_set->octets);
+}
 
 void bt_driver_id_copy_chip_info_string(char *dest, size_t dest_size) {
   strncpy(dest, "NimBLE", dest_size);
 }
 
 bool bt_driver_id_generate_private_resolvable_address(BTDeviceAddress *address_out) {
-  *address_out = (BTDeviceAddress){};
+  bt_local_id_generate_address_from_serial(address_out);
   return true;
 }

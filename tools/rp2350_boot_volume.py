@@ -15,6 +15,8 @@ import re
 import shutil
 import subprocess
 import sys
+import termios
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,6 +26,9 @@ RP2350_BOOT_PRODUCT = "RP2350 Boot"
 RP2350_BOOT_VENDOR_ID = 0x2E8A
 RP2350_BOOT_PRODUCT_ID = 0x000F
 SUBPROCESS_TIMEOUT_S = 3.0
+CDC_BOOTSEL_BAUD = termios.B115200
+BAUD_BOOTSEL_BAUD = termios.B1200
+DEFAULT_REQUEST_WAIT_S = 10.0
 
 
 @dataclass
@@ -85,6 +90,50 @@ class BootVolume:
 
 def status(message: str) -> None:
     print(message, flush=True)
+
+
+def configure_serial(fd: int, baud: int) -> None:
+    attrs = termios.tcgetattr(fd)
+    attrs[0] = 0
+    attrs[1] = 0
+    attrs[2] &= ~(termios.PARENB | termios.CSTOPB | termios.CSIZE)
+    attrs[2] |= termios.CS8 | termios.CREAD | termios.CLOCAL
+    attrs[3] = 0
+    attrs[4] = baud
+    attrs[5] = baud
+    attrs[6][termios.VMIN] = 0
+    attrs[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+
+
+def request_cdc_bootsel(port: pathlib.Path) -> None:
+    status(f"request BOOTSEL over CDC shell: {port}")
+    fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    try:
+        configure_serial(fd, CDC_BOOTSEL_BAUD)
+        os.write(fd, b"\r\nbootsel\r\n")
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            try:
+                os.read(fd, 4096)
+            except OSError:
+                break
+            time.sleep(0.05)
+    finally:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def request_1200_baud_bootsel(port: pathlib.Path) -> None:
+    status(f"request BOOTSEL with 1200-baud touch: {port}")
+    fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    try:
+        configure_serial(fd, BAUD_BOOTSEL_BAUD)
+        time.sleep(0.2)
+    finally:
+        os.close(fd)
 
 
 def parse_ioreg_value(raw: str) -> Any:
@@ -301,11 +350,65 @@ def copy_uf2(
     status("copy complete")
 
 
+def discover(include_diskutil: bool, read_info: bool, volume: pathlib.Path | None):
+    devices = macos_usb_devices()
+    boot_devices = [device for device in devices if device.is_rp2350_boot]
+    volumes = find_boot_volumes(volume, include_diskutil, read_info)
+    return devices, boot_devices, volumes
+
+
+def wait_for_bootsel(
+    timeout_s: float,
+    include_diskutil: bool,
+    read_info: bool,
+    volume: pathlib.Path | None,
+    expected_serial: str | None,
+) -> tuple[list[UsbDevice], list[UsbDevice], list[BootVolume]]:
+    deadline = time.monotonic() + timeout_s
+    last_devices: list[UsbDevice] = []
+    last_boot_devices: list[UsbDevice] = []
+    last_volumes: list[BootVolume] = []
+
+    while True:
+        devices, boot_devices, volumes = discover(include_diskutil, read_info, volume)
+        last_devices = devices
+        last_boot_devices = boot_devices
+        last_volumes = volumes
+
+        serial_ok = (
+            expected_serial is None
+            or any(device.serial == expected_serial for device in boot_devices)
+        )
+        if volumes and boot_devices and serial_ok:
+            return devices, boot_devices, volumes
+
+        if timeout_s <= 0 or time.monotonic() >= deadline:
+            return last_devices, last_boot_devices, last_volumes
+
+        time.sleep(0.25)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--volume", type=pathlib.Path, help="Explicit mounted BOOTSEL volume")
     parser.add_argument("--expect-serial", help="Required RP2350 BOOTSEL USB serial")
     parser.add_argument("--copy", type=pathlib.Path, help="UF2 file to copy after validation")
+    parser.add_argument(
+        "--cdc-bootsel-port",
+        type=pathlib.Path,
+        help="PebbleOS USB CDC debug port to command into BOOTSEL before scanning",
+    )
+    parser.add_argument(
+        "--baud-bootsel-port",
+        type=pathlib.Path,
+        help="USB serial port to touch at 1200 baud before scanning",
+    )
+    parser.add_argument(
+        "--wait-seconds",
+        type=float,
+        default=None,
+        help="Wait this long for the RP2350 BOOTSEL device and volume to appear",
+    )
     parser.add_argument(
         "--include-diskutil",
         action="store_true",
@@ -329,9 +432,28 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Validate and print the copy action only")
     args = parser.parse_args()
 
-    devices = macos_usb_devices()
-    boot_devices = [device for device in devices if device.is_rp2350_boot]
-    volumes = find_boot_volumes(args.volume, args.include_diskutil, args.read_info)
+    if args.cdc_bootsel_port and args.baud_bootsel_port:
+        raise SystemExit("Use only one of --cdc-bootsel-port or --baud-bootsel-port")
+
+    requested_bootsel = bool(args.cdc_bootsel_port or args.baud_bootsel_port)
+    wait_seconds = (
+        args.wait_seconds
+        if args.wait_seconds is not None
+        else (DEFAULT_REQUEST_WAIT_S if requested_bootsel else 0.0)
+    )
+
+    if args.cdc_bootsel_port:
+        request_cdc_bootsel(args.cdc_bootsel_port)
+    elif args.baud_bootsel_port:
+        request_1200_baud_bootsel(args.baud_bootsel_port)
+
+    devices, boot_devices, volumes = wait_for_bootsel(
+        wait_seconds,
+        args.include_diskutil,
+        args.read_info,
+        args.volume,
+        args.expect_serial,
+    )
 
     print_status(volumes, devices)
     validate_expected_serial(args.expect_serial, boot_devices)

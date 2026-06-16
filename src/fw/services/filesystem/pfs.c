@@ -791,6 +791,13 @@ static void pfs_prepare_for_file_creation(uint32_t file_size,
                                           uint32_t max_elapsed_ticks) {
   FRUITJAM_PFS_MARK("PFS PREP");
 
+#if defined(CONFIG_RP2350_PEBBLE_STORAGE_XIP_ERASE_HAZARD)
+  if (max_elapsed_ticks != 0) {
+    FRUITJAM_PFS_MARK("PFS PREP SKIP");
+    return;
+  }
+#endif
+
   uint16_t pages_to_find = (file_size + PFS_PAGE_SIZE) / PFS_PAGE_SIZE;
   uint16_t free_page = 0;
 

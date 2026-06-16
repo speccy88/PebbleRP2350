@@ -4,6 +4,7 @@
 #include "gh3x2x_tuning_service.h"
 
 #include <FreeRTOS.h>
+#include <bluetooth/id.h>
 #include <bluetooth/init.h>
 #include <comm/bt_lock.h>
 #include <host/ble_hs.h>
@@ -17,6 +18,7 @@
 #include <services/bas/ble_svc_bas.h>
 #include <services/gap/ble_svc_gap.h>
 #include <services/gatt/ble_svc_gatt.h>
+#include <pbl/services/bluetooth/local_id.h>
 #include <stdlib.h>
 #include <system/logging.h>
 #include <system/passert.h>
@@ -112,6 +114,12 @@ static void prv_host_task_main(void *unused) {
 
 static void prv_ble_hs_stop_cb(int status, void *arg) {
   xSemaphoreGive(s_host_stopped);
+}
+
+static void prv_set_serial_derived_identity_address(void) {
+  BTDeviceAddress address;
+  bt_local_id_generate_address_from_serial(&address);
+  bt_driver_set_local_address(false, &address);
 }
 
 static bool prv_stop_after_start_failure(const char *reason, bool assert_on_stop_timeout) {
@@ -271,6 +279,9 @@ bool bt_driver_start(BTDriverConfig *config) {
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
   fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageSynced, s_driver_state, 0);
   fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageEnsureAddr, s_driver_state, 0);
+#endif
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+  prv_set_serial_derived_identity_address();
 #endif
   rc = ble_hs_util_ensure_addr(0);
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)

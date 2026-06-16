@@ -703,6 +703,9 @@ static bool prv_intent_matches_connection(const GAPLEConnectionIntent *intent,
     if (bt_device_equal(&connection->device.opaque, &intent->device.opaque)) {
       return true;
     }
+    if (bt_device_equal(&connection->device.opaque, &intent->bonding->device.opaque)) {
+      return true;
+    }
     if (!connection->irk) {
       // are we looking for a bonding which did not exchange an irk?
       if (sm_is_pairing_info_irk_not_used(&intent->bonding->irk)) {
@@ -1020,9 +1023,20 @@ void gap_le_connect_handle_bonding_change(BTBondingID bonding_id, BtPersistBondi
     case BtPersistBondingOpDidAdd:
       // FIXME:
       break;
-    case BtPersistBondingOpDidChange:
+    case BtPersistBondingOpDidChange: {
       *intent->bonding = updated_bonding;
+      GAPLEConnection *connection = gap_le_connection_find_by_irk(&updated_bonding.irk);
+      if (!connection) {
+        connection = gap_le_connection_by_device(&updated_bonding.device);
+      }
+      if (connection) {
+        intent->device = connection->device;
+        prv_update_clients(intent, HciStatusCode_Success,
+                           connection->is_encrypted ? GAPLEConnectionEventConnectedAndEncrypted :
+                                                      GAPLEConnectionEventConnectedNotEncrypted);
+      }
       break;
+    }
     case BtPersistBondingOpWillDelete:
       for (GAPLEClient c = GAPLEClientKernel; c < GAPLEClientNum; ++c) {
         if (!intent->client[c].is_used) {

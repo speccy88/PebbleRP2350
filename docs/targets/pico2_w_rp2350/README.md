@@ -62,8 +62,9 @@ flashing:
 
 ```sh
 .venv/bin/python tools/rp2350_boot_volume.py \
+  --cdc-bootsel-port /dev/cu.usbmodemPICO2WRP23501 \
   --expect-serial B2047FF29EB03C7E \
-  --copy build/artifacts/pico2_w_rp2350_pebbleos_sdk_clocks.uf2
+  --copy build/artifacts/pebbleos-pico2-w-rp2350.uf2
 ```
 
 Latest normal profile build evidence, 2026-06-15:
@@ -88,13 +89,15 @@ hardware_tests/fruitjam_memory_lcd/build/_deps/picotool-build/picotool uf2 conve
 .venv/bin/python tools/fruitjam_pack_uf2.py \
   --firmware-uf2 build/src/fw/pico2_w_tintin_fw.uf2 \
   --resources build/system_resources.pbpack \
-  --output build/artifacts/pico2_w_rp2350_pebbleos_sdk_clocks.uf2 \
+  --output build/artifacts/pebbleos-pico2-w-rp2350.uf2 \
   --resources-address 0x10150000 \
   --resources-bank-size 0x000c0000
 ```
 
-- Path: `build/artifacts/pico2_w_rp2350_pebbleos_sdk_clocks.uf2`
-- SHA-256:
+- Current release path: `build/artifacts/pebbleos-pico2-w-rp2350.uf2`
+- Older hardware-verified path:
+  `build/artifacts/pico2_w_rp2350_pebbleos_sdk_clocks.uf2`
+- Older hardware-verified SHA-256:
   `7741f4a021dc7137138ac77873b1b9285726654a4090fb79660f19060558687b`
 - UF2 address check: family `0xe48bff59` range `0x10000000-0x10205100`;
   RP2350-E10 absolute block family `0xe48bff57` range
@@ -106,7 +109,7 @@ Hardware flash and runtime evidence:
 ```sh
 /Users/fred/.pico-sdk/picotool/2.1.1/picotool/picotool load \
   -f --ser B2047FF29EB03C7E -v -x \
-  build/artifacts/pico2_w_rp2350_pebbleos_sdk_clocks.uf2
+  build/artifacts/pebbleos-pico2-w-rp2350.uf2
 ```
 
 - BOOTSEL device: chip serial `B2047FF29EB03C7E`, flash size `4096K`.
@@ -119,6 +122,12 @@ Hardware flash and runtime evidence:
   `App <TicToc>`.
 - Frame capture: `/tmp/pico2_w_after_sdk_clocks.png` showed the TicToc
   framebuffer (`January 1`, `12:01`).
+- 2026-06-16 helper validation: the command above put the live Pico 2 W into
+  BOOTSEL from its PebbleOS CDC port, waited for `/Volumes/RP2350`, validated
+  BOOTSEL serial `B2047FF29EB03C7E`, copied the Pico-safe PebbleOS UF2, and the
+  board returned at `/dev/cu.usbmodemPICO2WRP23501`. CDC `ping` returned
+  `pong`, `progress` returned `stage=7 label="07 LCD"`, and frame capture
+  `/tmp/pico2w_restored_after_helper_test.png` showed TicToc running again.
 
 Hardware note: an earlier Pico UF2 packed with Fruit Jam's 16 MiB resource
 address did not come back over USB on the live Pico. Use BOOTSEL to recover and
@@ -159,6 +168,12 @@ The build was already up to date. The generated UF2 is:
 - Hardware check: the corrected probe enumerated as USB serial
   `B2047FF29EB03C7E`, reported `hci_state=2 advertising=1`, and was visible to
   macOS BLE scan as `Pico2W-HCI`.
+- 2026-06-16 live probe check: PebbleOS commanded the Pico 2 W into BOOTSEL,
+  `tools/rp2350_boot_volume.py --expect-serial B2047FF29EB03C7E --copy` loaded
+  the probe UF2, the probe USB serial came back as `/dev/cu.usbmodem11201`, and
+  serial output showed `tick 15 hci_state=2 advertising=1`. A Mac BLE scan found
+  `Pico2W-HCI` with RSSI `-51`. The Pico was then restored to the PebbleOS UF2
+  and verified by CDC/frame capture.
 
 The initial resource map reuses the Fruit Jam/Flint resource IDs so the firmware
 and Core Devices app keep the same Pebble 2 Duo-compatible ABI while the Pico 2 W

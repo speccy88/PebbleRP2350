@@ -3,7 +3,7 @@
 	url = https://github.com/ARM-software/CMSIS_5.git
 [submodule "src/bluetooth-fw/nimble/vendor/mynewt-nimble"]
 	path = third_party/nimble/mynewt-nimble
-	url = https://github.com/coredevices/mynewt-nimble.git
+	url = https://github.com/speccy88/mynewt-nimble.git
 [submodule "third_party/hal_nordic/nrfx"]
 	path = third_party/hal_nordic/nrfx
 	url = https://github.com/NordicSemiconductor/nrfx

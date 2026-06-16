@@ -36,6 +36,14 @@ python -m esptool --chip esp32c6 --before no_reset --after no_reset \
 
 After flashing, restore the PebbleOS Fruit Jam RP2350 UF2.
 
+For GitHub releases, publish both files:
+
+- `fruitjam-esp32c6-hci-YYYYMMDD.bin`: copied from `build/merged-binary.bin`;
+  this is the actual ESP32-C6 firmware.
+- `fruitjam-esp32c6-serial-passthrough-YYYYMMDD.uf2`: copied from
+  `tools/SerialESPPassthrough.ino.uf2`; this is only the RP2350 bridge used by
+  `esptool`.
+
 ## Flash Via PebbleOS CDC Passthrough
 
 PebbleOS builds that expose the Fruit Jam USB debug shell can put the ESP32-C6

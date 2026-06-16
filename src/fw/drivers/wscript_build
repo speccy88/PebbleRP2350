@@ -266,7 +266,7 @@ elif bld.env.CONFIG_SOC_RP2350:
     bld.objects(
         name='driver_mcu',
         source=[
-            'stubs/mcu.c',
+            'rp2350/mcu.c',
         ],
         use=[
             'fw_includes',

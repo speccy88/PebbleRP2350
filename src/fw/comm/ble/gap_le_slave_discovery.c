@@ -32,6 +32,8 @@
 static GAPLEAdvertisingJobRef s_discovery_advert_job;
 
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+#define RP2350_DISCOVERY_BT_VENDOR_ID BT_VENDOR_ID
+
 static void prv_set_minimal_manufacturer_data(BLEAdData *ad) {
   struct PACKED ManufacturerSpecificData {
     uint8_t payload_type;
@@ -41,11 +43,10 @@ static void prv_set_minimal_manufacturer_data(BLEAdData *ad) {
   };
   memcpy(&mfg_data.serial_number, mfg_get_serial_number(), MFG_SERIAL_NUMBER_SIZE);
 
-  ble_ad_set_manufacturer_specific_data(ad, BT_VENDOR_ID, (const uint8_t *)&mfg_data,
+  ble_ad_set_manufacturer_specific_data(ad, RP2350_DISCOVERY_BT_VENDOR_ID, (const uint8_t *)&mfg_data,
                                         sizeof(struct ManufacturerSpecificData));
 }
 #else
-
 static void prv_set_extended_manufacturer_data(BLEAdData *ad) {
   struct PACKED ManufacturerSpecificData {
     uint8_t payload_type;
@@ -132,13 +133,12 @@ static void prv_schedule_ad_job(void) {
   bt_local_id_copy_device_name(device_name, true);
 
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
-  ble_ad_set_local_name(ad, "Pebble");
-  prv_set_minimal_manufacturer_data(ad);
+  ble_ad_set_service_uuids(ad, service_uuids, num_uuids);
+  ble_ad_set_local_name(ad, device_name);
   ble_ad_set_tx_power_level(ad);
 
   ble_ad_start_scan_response(ad);
-  ble_ad_set_service_uuids(ad, service_uuids, num_uuids);
-  ble_ad_set_local_name(ad, device_name);
+  prv_set_minimal_manufacturer_data(ad);
 #else
   ble_ad_set_service_uuids(ad, service_uuids, num_uuids);
   ble_ad_set_local_name(ad, device_name);
@@ -152,6 +152,14 @@ static void prv_schedule_ad_job(void) {
 #endif
 
   // Values chosen according to Apple Accessory Design Guidelines.
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+  const GAPLEAdvertisingJobTerm advert_terms[] = {
+      {
+          .duration_secs = GAPLE_ADVERTISING_DURATION_INFINITE,
+          .interval = GAPLEAdvertisingInterval_Short,
+      },
+  };
+#else
   const GAPLEAdvertisingJobTerm advert_terms[] = {
       {
           // Extend this term from recommended 30s to 5min so user has e.g. time
@@ -164,6 +172,7 @@ static void prv_schedule_ad_job(void) {
           .interval = GAPLEAdvertisingInterval_Long,
       },
   };
+#endif
 
   s_discovery_advert_job = gap_le_advert_schedule(
       ad, advert_terms, sizeof(advert_terms) / sizeof(GAPLEAdvertisingJobTerm),

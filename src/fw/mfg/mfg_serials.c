@@ -1,11 +1,16 @@
 /* SPDX-FileCopyrightText: 2024 Google LLC */
 /* SPDX-License-Identifier: Apache-2.0 */
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "mfg_serials.h"
 
 #include "console/prompt.h"
+#include "drivers/mcu.h"
+#include "system/status_codes.h"
 #include "util/size.h"
 
 static const uint8_t OTP_SERIAL_SLOT_INDICES[] = {
@@ -25,6 +30,40 @@ static const char DUMMY_PCBA_SERIAL[MFG_PCBA_SERIAL_NUMBER_SIZE + 1] = "XXXXXXXX
 
 static void mfg_print_feedback(const MfgSerialsResult result, const uint8_t index, const char *value, const char *name);
 
+static bool prv_bytes_are_repeated(const uint8_t *bytes, size_t size, uint8_t value) {
+  for (size_t i = 0; i < size; ++i) {
+    if (bytes[i] != value) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static const char *prv_get_fallback_serial_number(void) {
+  static bool s_attempted;
+  static char s_serial[MFG_SERIAL_NUMBER_SIZE + 1];
+
+  if (!s_attempted) {
+    uint8_t mcu_serial[16];
+    size_t mcu_serial_size = sizeof(mcu_serial);
+
+    if ((mcu_get_serial(mcu_serial, &mcu_serial_size) == S_SUCCESS) &&
+        (mcu_serial_size >= (MFG_SERIAL_NUMBER_SIZE / 2)) &&
+        !prv_bytes_are_repeated(mcu_serial, mcu_serial_size, 0x00) &&
+        !prv_bytes_are_repeated(mcu_serial, mcu_serial_size, 0xff)) {
+      const size_t offset = mcu_serial_size - (MFG_SERIAL_NUMBER_SIZE / 2);
+      for (size_t i = 0; i < (MFG_SERIAL_NUMBER_SIZE / 2); ++i) {
+        sniprintf(&s_serial[i * 2], 3, "%02X", mcu_serial[offset + i]);
+      }
+      s_serial[MFG_SERIAL_NUMBER_SIZE] = '\0';
+    }
+
+    s_attempted = true;
+  }
+
+  return s_serial[0] ? s_serial : DUMMY_SERIAL;
+}
+
 const char* mfg_get_serial_number(void) {
   // Trying from "most recent" slot to "least recent":
   for (int i = ARRAY_LENGTH(OTP_SERIAL_SLOT_INDICES) - 1; i >= 0; --i) {
@@ -33,7 +72,7 @@ const char* mfg_get_serial_number(void) {
       return otp_get_slot(index);
     }
   }
-  return DUMMY_SERIAL;
+  return prv_get_fallback_serial_number();
 }
 
 const char* mfg_get_hw_version(void) {
@@ -241,4 +280,3 @@ void mfg_write_bigboard_serial_number(void) {
   }
 }
 #endif
-

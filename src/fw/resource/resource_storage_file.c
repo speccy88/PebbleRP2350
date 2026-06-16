@@ -132,6 +132,10 @@ static bool resource_storage_file_unwatch(ResourceCallbackHandle cb_handle) {
 }
 
 static void resource_storage_file_init(void) {
+#if defined(CONFIG_RP2350_PEBBLE_STORAGE_XIP_ERASE_HAZARD)
+  return;
+#endif
+
   // Make sure the files we have are valid
   for (unsigned int i = 0; i < g_num_file_resource_stores; ++i) {
     // The only way we can check this file is valid is by making sure each resource in each file

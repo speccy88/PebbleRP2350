@@ -17,6 +17,15 @@ static uint32_t s_pra_cycling_pause_count;
 static BTDeviceAddress s_pinned_addr;
 static bool s_cycling_paused_due_to_dependent_bondings;
 
+static bool prv_is_valid_static_random_address(const BTDeviceAddress *addr) {
+  int ones = 0;
+  for (size_t i = 0; i < sizeof(addr->octets); ++i) {
+    ones += __builtin_popcount(addr->octets[i]);
+  }
+
+  return ((addr->octets[5] & 0xc0) == 0xc0) && (ones > 2) && (ones < 48);
+}
+
 static void prv_allow_cycling(bool allow_cycling) {
   bt_driver_set_local_address(allow_cycling, allow_cycling ? NULL : &s_pinned_addr);
 }
@@ -89,7 +98,8 @@ void bt_local_addr_init(void) {
   s_cycling_paused_due_to_dependent_bondings = false;
 
   // Load pinned address from settings file or generate one if it hasn't happened before:
-  if (!bt_persistent_storage_get_ble_pinned_address(&s_pinned_addr)) {
+  if (!bt_persistent_storage_get_ble_pinned_address(&s_pinned_addr) ||
+      !prv_is_valid_static_random_address(&s_pinned_addr)) {
     if (bt_driver_id_generate_private_resolvable_address(&s_pinned_addr)) {
       bt_persistent_storage_set_ble_pinned_address(&s_pinned_addr);
     } else {

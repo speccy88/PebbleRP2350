@@ -21,17 +21,27 @@ static BTDeviceAddress s_local_address;
 static char s_local_device_name[BT_DEVICE_NAME_BUFFER_SIZE];
 static char s_local_le_device_name[BT_DEVICE_NAME_BUFFER_SIZE];
 
-static void prv_populate_name(char name[BT_DEVICE_NAME_BUFFER_SIZE], const char *name_fmt) {
-  sprintf(name, name_fmt, s_local_address.octets[1], s_local_address.octets[0]);
-}
-
 static void prv_set_default_device_name(void) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  strncpy(s_local_device_name, "Pebble RP2350", sizeof(s_local_device_name));
+  strncpy(s_local_le_device_name, "Pebble RP2350", sizeof(s_local_le_device_name));
+  s_local_device_name[sizeof(s_local_device_name) - 1] = '\0';
+  s_local_le_device_name[sizeof(s_local_le_device_name) - 1] = '\0';
+#elif defined(CONFIG_BOARD_PICO2_W_RP2350)
+  strncpy(s_local_device_name, "Pebble Pico2W", sizeof(s_local_device_name));
+  strncpy(s_local_le_device_name, "Pebble Pico2W", sizeof(s_local_le_device_name));
+  s_local_device_name[sizeof(s_local_device_name) - 1] = '\0';
+  s_local_le_device_name[sizeof(s_local_le_device_name) - 1] = '\0';
+#else
+  const uint8_t suffix_hi = s_local_address.octets[1];
+  const uint8_t suffix_lo = s_local_address.octets[0];
   const char *s_local_default_device_name_format = "Pebble %02X%02X";
   const char *s_local_default_le_device_name_format = "Pebble-LE %02X%02X";
 
   // Pebble + hex last 2 bytes of the device address:
-  prv_populate_name(s_local_device_name, s_local_default_device_name_format);
-  prv_populate_name(s_local_le_device_name, s_local_default_le_device_name_format);
+  sprintf(s_local_device_name, s_local_default_device_name_format, suffix_hi, suffix_lo);
+  sprintf(s_local_le_device_name, s_local_default_le_device_name_format, suffix_hi, suffix_lo);
+#endif
 }
 
 static bool prv_has_device_name(void) {
