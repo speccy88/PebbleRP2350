@@ -74,6 +74,9 @@ static void prv_reset_cb(int reason) {
   fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageHostReset, s_driver_state,
                                         reason);
   fruitjam_bt_debug_record_host_reset(reason);
+  if (reason == BLE_HS_ETIMEOUT_HCI) {
+    fruitjam_bt_debug_schedule_recovery(FruitJamBtDebugRecoveryReasonHostReset, reason);
+  }
 #endif
 #ifdef CONFIG_SOC_SF32LB52
   // Controller stopped answering HCI. Crash so the coredump captures LCPU RAM
@@ -82,16 +85,34 @@ static void prv_reset_cb(int reason) {
 #endif
 }
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+static void prv_configure_security(void) {
+  ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
+  ble_hs_cfg.sm_oob_data_flag = 0;
+  ble_hs_cfg.sm_bonding = 1;
+  ble_hs_cfg.sm_mitm = 0;
+  ble_hs_cfg.sm_sc = 1;
+  ble_hs_cfg.sm_keypress = 0;
+  ble_hs_cfg.sm_our_key_dist = BLE_HS_KEY_DIST_ENC_KEY | BLE_HS_KEY_DIST_ID_KEY;
+  ble_hs_cfg.sm_their_key_dist = BLE_HS_KEY_DIST_ENC_KEY | BLE_HS_KEY_DIST_ID_KEY;
+}
+#endif
+
 static void prv_host_task_main(void *unused) {
   PBL_LOG_DBG("NimBLE host task started");
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+  prv_configure_security();
+#endif
   ble_hs_cfg.sync_cb = prv_sync_cb;
   ble_hs_cfg.reset_cb = prv_reset_cb;
 
   nimble_port_run();
 }
 
-static void prv_ble_hs_stop_cb(int status, void *arg) { xSemaphoreGive(s_host_stopped); }
+static void prv_ble_hs_stop_cb(int status, void *arg) {
+  xSemaphoreGive(s_host_stopped);
+}
 
 static bool prv_stop_after_start_failure(const char *reason, bool assert_on_stop_timeout) {
   int rc;
@@ -173,15 +194,14 @@ bool bt_driver_start(BTDriverConfig *config) {
   if (s_driver_state == DriverStateStarted) {
     PBL_LOG_WRN("Driver already started; skipping start");
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
-    fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageAlreadyStarted,
-                                          s_driver_state, 0);
+    fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageAlreadyStarted, s_driver_state,
+                                          0);
 #endif
     return true;
   }
 
   if (s_driver_state != DriverStateStopped) {
-    PBL_LOG_ERR("Unexpected driver state %u; refusing to start",
-                  (unsigned)s_driver_state);
+    PBL_LOG_ERR("Unexpected driver state %u; refusing to start", (unsigned)s_driver_state);
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
     fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageBadState, s_driver_state, 0);
 #endif
@@ -223,25 +243,24 @@ bool bt_driver_start(BTDriverConfig *config) {
 #endif
 
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
-  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageServicesReady, s_driver_state,
-                                        0);
+  fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageServicesReady, s_driver_state, 0);
 #endif
   if (!host_enabled) {
     ble_hs_sched_start();
   }
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
-  fruitjam_bt_debug_record_driver_stage(host_synced ? FruitJamBtDebugDriverStageSynced
-                                                    : FruitJamBtDebugDriverStageWaitSync,
-                                        s_driver_state, 0);
+  fruitjam_bt_debug_record_driver_stage(
+      host_synced ? FruitJamBtDebugDriverStageSynced : FruitJamBtDebugDriverStageWaitSync,
+      s_driver_state, 0);
 #endif
   f_rc = host_synced ? pdTRUE
                      : xSemaphoreTake(s_host_started,
                                       milliseconds_to_ticks(s_bt_stack_start_stop_timeout_ms));
   if (f_rc != pdTRUE) {
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
-    fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageSyncTimeout, s_driver_state,
-                                          0);
+    fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageSyncTimeout, s_driver_state, 0);
     fruitjam_bt_debug_record_driver_start(false);
+    fruitjam_bt_debug_schedule_recovery(FruitJamBtDebugRecoveryReasonStartTimeout, 0);
     return prv_stop_after_start_failure("NimBLE host start timed out; ESP HCI unavailable", false);
 #else
     // core_dump wakes the LCPU itself, so its RAM is captured here too.
@@ -273,6 +292,7 @@ err:
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
   fruitjam_bt_debug_record_driver_stage(FruitJamBtDebugDriverStageError, s_driver_state, rc);
   fruitjam_bt_debug_record_driver_start(false);
+  fruitjam_bt_debug_schedule_recovery(FruitJamBtDebugRecoveryReasonStartError, rc);
   return prv_stop_after_start_failure("NimBLE host start failed", false);
 #else
   return prv_stop_after_start_failure("NimBLE host start failed", true);

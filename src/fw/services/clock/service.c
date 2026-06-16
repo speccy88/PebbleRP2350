@@ -24,6 +24,10 @@
 #include "util/string.h"
 #include "pbl/services/analytics/analytics.h"
 
+#if defined(CONFIG_SOC_RP2350)
+#include "soc/rp2350/rp2350/rp2350_external_rtc.h"
+#endif
+
 #ifndef CONFIG_RECOVERY_FW
 #include "pbl/services/notifications/do_not_disturb.h"
 #include "pbl/services/notifications/alerts.h"
@@ -40,10 +44,21 @@ PBL_LOG_MODULE_DEFINE(service_clock, CONFIG_SERVICE_CLOCK_LOG_LEVEL);
 // timezone support
 
 #define UNKNOWN_TIMEZONE_ID (-1)
+#define RP2350_PHONE_TIME_REQUEST_SECONDS 10U
 
 static const uint16_t protocol_time_endpoint_id = 11;
 
 static RegularTimerInfo s_dst_checker;
+
+#if defined(CONFIG_SOC_RP2350)
+static RegularTimerInfo s_rp2350_phone_time_requester;
+static bool s_rp2350_phone_time_polling_enabled;
+static uint32_t s_rp2350_phone_time_timer_count;
+static uint32_t s_rp2350_phone_time_request_count;
+static uint32_t s_rp2350_phone_time_no_session_count;
+static uint32_t s_rp2350_phone_time_skip_manual_count;
+static uint32_t s_rp2350_phone_time_skip_external_rtc_count;
+#endif
 
 #ifndef CONFIG_RECOVERY_FW
 // Armed on the first timer tick, after init has settled.
@@ -53,6 +68,24 @@ static bool s_hourly_chime_armed;
 static time_t prv_migrate_local_time_to_UTC(time_t local_time) {
   return time_local_to_utc(local_time);
 }
+
+#if defined(CONFIG_SOC_RP2350)
+static void prv_rp2350_request_phone_time_if_needed(void *data) {
+  (void)data;
+
+  ++s_rp2350_phone_time_timer_count;
+  if (rp2350_external_rtc_has_valid_time() && clock_is_timezone_set()) {
+    ++s_rp2350_phone_time_skip_external_rtc_count;
+    return;
+  }
+  if (clock_time_source_is_manual()) {
+    ++s_rp2350_phone_time_skip_manual_count;
+    return;
+  }
+
+  clock_request_time_from_phone();
+}
+#endif
 
 // Should only called by prv_update_time_info_and_generate_event()!
 static void prv_handle_timezone_set(TimezoneInfo *tz_info) {
@@ -66,9 +99,9 @@ static void prv_handle_timezone_set(TimezoneInfo *tz_info) {
 typedef struct PACKED {
 // This struct is packed because it mirrors the endpoint definition:
 // https://pebbletechnology.atlassian.net/wiki/pages/viewpage.action?pageId=491698#PebbleProtocol(BluetoothSerial)-0xb(11)-Time/Clock(bigendian)
-  time_t utc_time;                           // UTC timestamp
-  int16_t utc_offset_min;                    // local timestamp - UTC timestamp in mins
-  int8_t region_name_len;                    // timezone name length
+  time_t utc_time;                         // UTC timestamp
+  int16_t utc_offset_min;                  // local timestamp - UTC timestamp in mins
+  int8_t region_name_len;                  // timezone name length
   char region_name[TIMEZONE_NAME_LENGTH];  // timezone name string
 } TimezoneCBData;
 
@@ -81,13 +114,13 @@ static time_t prv_clock_dstrule_to_timestamp(
     bool is_end, const TimezoneInfo *tz_info, const TimezoneDSTRule *rule, int year) {
 
   struct tm time_tm = {
-    .tm_min = rule->minute,
-    .tm_hour = rule->hour,
-    .tm_mday = rule->mday,
-    .tm_mon = rule->month,
-    .tm_year = year,
-    .tm_gmtoff = 0,
-    .tm_isdst = 0,
+      .tm_min = rule->minute,
+      .tm_hour = rule->hour,
+      .tm_mday = rule->mday,
+      .tm_mon = rule->month,
+      .tm_year = year,
+      .tm_gmtoff = 0,
+      .tm_isdst = 0,
   };
   // A few countries actually have their DST rule on the midnight AFTER a day
   // This is subtly different from the midnight OF a day.
@@ -101,7 +134,7 @@ static time_t prv_clock_dstrule_to_timestamp(
   time_t uxtime = mktime(&time_tm);
   gmtime_r(&uxtime, &time_tm);
 
-  for (int i = 0; i < DAYS_PER_WEEK; i++) { // max is DAYS_PER_WEEK to find a day_of_week
+  for (int i = 0; i < DAYS_PER_WEEK; i++) {  // max is DAYS_PER_WEEK to find a day_of_week
     // we also have to check month here, as leap-year case puts us 1 day past feb
 #define DSTRULE_WDAY_ANY (255)
     if ((time_tm.tm_wday == rule->wday || rule->wday == DSTRULE_WDAY_ANY) &&
@@ -119,13 +152,13 @@ static time_t prv_clock_dstrule_to_timestamp(
     gmtime_r(&uxtime, &time_tm);
   }
 
-  if (rule->flag & TIMEZONE_FLAG_STANDARD_TIME) { // Standard time (not wall time)
+  if (rule->flag & TIMEZONE_FLAG_STANDARD_TIME) {  // Standard time (not wall time)
     time_tm.tm_gmtoff = tz_info->tm_gmtoff;
     time_tm.tm_isdst = 0;
-  } else if (rule->flag & TIMEZONE_FLAG_UTC_TIME) { // UTC
+  } else if (rule->flag & TIMEZONE_FLAG_UTC_TIME) {  // UTC
     time_tm.tm_gmtoff = 0;
     time_tm.tm_isdst = 0;
-  } else { // Wall time
+  } else {  // Wall time
     time_tm.tm_gmtoff = tz_info->tm_gmtoff;
     time_tm.tm_isdst = is_end;
   }
@@ -138,7 +171,7 @@ static time_t prv_clock_dstrule_to_timestamp(
   uxtime -= time_tm.tm_gmtoff;
   return uxtime;
 }
-#endif // CONFIG_RECOVERY_FW
+#endif  // CONFIG_RECOVERY_FW
 
 T_STATIC void prv_update_dstrule_timestamps_by_dstzone_id(TimezoneInfo *tz_info, time_t utc_time) {
   if (tz_info->dst_id == 0) {
@@ -199,7 +232,7 @@ T_STATIC void prv_update_dstrule_timestamps_by_dstzone_id(TimezoneInfo *tz_info,
   tz_info->dst_start = dst_start_stamps[start_idx];
   tz_info->dst_end = dst_end_stamps[end_idx];
 
-#endif // CONFIG_RECOVERY_FW
+#endif  // CONFIG_RECOVERY_FW
 }
 
 static void prv_clock_get_timezone_info_from_region_id(
@@ -231,11 +264,11 @@ static TimezoneInfo prv_get_timezone_info_from_data(TimezoneCBData *tz_data) {
   // Else, we couldn't find find the specified timezone.
 #ifndef CONFIG_RECOVERY_FW
   TimezoneInfo tz_info = {
-    .dst_id = 0,
-    .timezone_id = UNKNOWN_TIMEZONE_ID,
-    .tm_gmtoff = tz_data->utc_offset_min * SECONDS_PER_MINUTE,
-    .dst_start = 0,
-    .dst_end = 0,
+      .dst_id = 0,
+      .timezone_id = UNKNOWN_TIMEZONE_ID,
+      .tm_gmtoff = tz_data->utc_offset_min * SECONDS_PER_MINUTE,
+      .dst_start = 0,
+      .dst_end = 0,
   };
 
   // I was hoping to fill the name with something like UTC-10 or UTC+4.25 but we only get 5 chars
@@ -254,7 +287,7 @@ T_STATIC void prv_update_time_info_and_generate_event(time_t *t, TimezoneInfo *t
   time_t orig_utc_time = rtc_get_time();
   TimezoneInfo tz_adjust_info = {{0}};
 
-  if (clock_is_timezone_set()) { // We'll need to update timezone stamps.
+  if (clock_is_timezone_set()) {  // We'll need to update timezone stamps.
     time_t tz_adjust_time;
     // Get the time that we need to adjust for.
     if (t) {
@@ -262,13 +295,13 @@ T_STATIC void prv_update_time_info_and_generate_event(time_t *t, TimezoneInfo *t
     } else {
       tz_adjust_time = orig_utc_time;
     }
-    if (tz_info) { // Adjust the DST rule timestamps of the provided tz_info
+    if (tz_info) {  // Adjust the DST rule timestamps of the provided tz_info
       prv_update_dstrule_timestamps_by_dstzone_id(tz_info, tz_adjust_time);
     } else if (clock_get_timezone_region_id() != UNKNOWN_TIMEZONE_ID) {
       // If we have a timezone _actually_ set, update our own.
       int region_id = clock_get_timezone_region_id();
       prv_clock_get_timezone_info_from_region_id(region_id, tz_adjust_time, &tz_adjust_info);
-      tz_info = &tz_adjust_info; // We need to set timezone info so point to the new info.
+      tz_info = &tz_adjust_info;  // We need to set timezone info so point to the new info.
     }
   }
 
@@ -292,10 +325,10 @@ T_STATIC void prv_update_time_info_and_generate_event(time_t *t, TimezoneInfo *t
 
   PebbleEvent e = {
     .type = PEBBLE_SET_TIME_EVENT,
-    .set_time_info = {
-      .utc_time_delta = new_utc_time - orig_utc_time,
-      .gmt_offset_delta = new_gmt_offset - orig_gmt_offset,
-      .dst_changed = false,
+                   .set_time_info = {
+                       .utc_time_delta = new_utc_time - orig_utc_time,
+                       .gmt_offset_delta = new_gmt_offset - orig_gmt_offset,
+                       .dst_changed = false,
     }
   };
   event_put(&e);
@@ -396,7 +429,7 @@ void clock_protocol_msg_callback(CommSession *session, const uint8_t* data, unsi
 T_STATIC void prv_watch_dst(void* user) {
   const bool was_dst = (bool)user;
   const bool is_dst = time_get_isdst(rtc_get_time());
-  
+
 #ifndef CONFIG_RECOVERY_FW
   if (!s_hourly_chime_armed) {
     s_hourly_chime_armed = true;
@@ -415,10 +448,10 @@ T_STATIC void prv_watch_dst(void* user) {
   if (is_dst != was_dst) {
     PebbleEvent e = {
       .type = PEBBLE_SET_TIME_EVENT,
-      .set_time_info = {
-        .utc_time_delta = 0,
-        .gmt_offset_delta = 0,
-        .dst_changed = true,
+                     .set_time_info = {
+                         .utc_time_delta = 0,
+                         .gmt_offset_delta = 0,
+                         .dst_changed = true,
       }
     };
     event_put(&e);
@@ -427,7 +460,7 @@ T_STATIC void prv_watch_dst(void* user) {
 }
 
 // Minimum valid time: January 1, 2010 00:00:00 UTC
-// On RTC loss, Asterix boots to 1970 and Obelix to 2000 
+// On RTC loss, Asterix boots to 1970 and Obelix to 2000
 // Snap forward so time isnt *that* off
 #define MIN_VALID_BOOT_TIMESTAMP 1262304000
 
@@ -441,9 +474,19 @@ void clock_init(void) {
     rtc_get_timezone(&tz_info);
     time_util_update_timezone(&tz_info);
   }
+#if defined(CONFIG_SOC_RP2350)
+  if (!rp2350_external_rtc_has_valid_time() || !clock_is_timezone_set()) {
+    s_rp2350_phone_time_requester = (RegularTimerInfo) {
+        .cb = prv_rp2350_request_phone_time_if_needed,
+    };
+    s_rp2350_phone_time_polling_enabled = true;
+    regular_timer_add_multisecond_callback(&s_rp2350_phone_time_requester,
+                                           RP2350_PHONE_TIME_REQUEST_SECONDS);
+  }
+#endif
   // TODO: Using a regular timer is pretty gross...
   s_dst_checker = (RegularTimerInfo) {
-    .cb = prv_watch_dst,
+      .cb = prv_watch_dst,
     .cb_data = (void*)time_get_isdst(rtc_get_time()),
   };
 #ifndef CONFIG_RECOVERY_FW
@@ -543,7 +586,7 @@ static void prv_copy_relative_time_string(char *number_buffer, uint8_t number_bu
   time_t now = rtc_get_time();
   // average without overflows since time_t might be signed and now ~1.4 billion, so 2*now > INT_MAX
   time_t midtime = timestamp / 2 + end_time / 2;
-  if (midtime > now) { // future
+  if (midtime > now) {  // future
     time_t difference = timestamp - now;
     if (timestamp < now || difference < SECONDS_PER_MINUTE) {
       i18n_get_with_buffer("Now", word_buffer, word_buffer_size);
@@ -551,18 +594,18 @@ static void prv_copy_relative_time_string(char *number_buffer, uint8_t number_bu
     } else if (difference <= SECONDS_PER_HOUR) {
       snprintf(number_buffer, number_buffer_size, "%ld", difference / SECONDS_PER_MINUTE);
       i18n_get_with_buffer(" MIN. TO", word_buffer, word_buffer_size);
-    }  else {
+    } else {
       prv_copy_time_string_timestamp(number_buffer, number_buffer_size, word_buffer,
-        word_buffer_size, timestamp);
+                                     word_buffer_size, timestamp);
     }
-  } else { // past
+  } else {  // past
     time_t difference = now - timestamp;
     if (now < timestamp || difference < SECONDS_PER_MINUTE) {
       i18n_get_with_buffer("Now", word_buffer, word_buffer_size);
       strncpy(number_buffer, "", number_buffer_size);
     } else {
       prv_copy_time_string_timestamp(number_buffer, number_buffer_size, word_buffer,
-        word_buffer_size, timestamp);
+                                     word_buffer_size, timestamp);
     }
   }
 }
@@ -623,6 +666,9 @@ void clock_set_manual_time_source(bool manual) {
 void clock_request_time_from_phone(void) {
   CommSession *session = comm_session_get_system_session();
   if (!session) {
+#if defined(CONFIG_SOC_RP2350)
+    ++s_rp2350_phone_time_no_session_count;
+#endif
     PBL_LOG_VERBOSE("No system session, cannot request time from phone");
     return;
   }
@@ -632,7 +678,24 @@ void clock_request_time_from_phone(void) {
   const uint8_t request[] = { 0x04 };
   comm_session_send_data(session, protocol_time_endpoint_id, request,
                          sizeof(request), COMM_SESSION_DEFAULT_TIMEOUT);
+#if defined(CONFIG_SOC_RP2350)
+  ++s_rp2350_phone_time_request_count;
+#endif
 }
+
+#if defined(CONFIG_SOC_RP2350)
+void clock_rp2350_get_phone_time_debug(ClockRp2350PhoneTimeDebug *debug) {
+  *debug = (ClockRp2350PhoneTimeDebug) {
+      .polling_enabled = s_rp2350_phone_time_polling_enabled,
+      .poll_seconds = RP2350_PHONE_TIME_REQUEST_SECONDS,
+      .timer_count = s_rp2350_phone_time_timer_count,
+      .request_count = s_rp2350_phone_time_request_count,
+      .no_session_count = s_rp2350_phone_time_no_session_count,
+      .skip_manual_count = s_rp2350_phone_time_skip_manual_count,
+      .skip_external_rtc_count = s_rp2350_phone_time_skip_external_rtc_count,
+  };
+}
+#endif
 
 DEFINE_SYSCALL(time_t, clock_to_timestamp, WeekDay day, int hour, int minute) {
   time_t t = sys_get_time();
@@ -647,7 +710,7 @@ DEFINE_SYSCALL(time_t, clock_to_timestamp, WeekDay day, int hour, int minute) {
   } else if ((hour < cal.tm_hour) || (hour == cal.tm_hour && minute <= cal.tm_min)){
     // Always return a future timestamp, so if day was today, and
     // minutes and hours already occurred, just make it tomorrow
-    cal.tm_mday++; // normalized by mktime
+    cal.tm_mday++;  // normalized by mktime
   }
 
   cal.tm_hour = hour;
@@ -1027,17 +1090,17 @@ typedef struct daypart_message {
 } daypart_message;
 
 static const daypart_message daypart_messages[] = {
-  {0,  i18n_noop("this morning")},  // anything before 12pm of the current day
-  {12, i18n_noop("this afternoon")},  // 12pm today
-  {18, i18n_noop("this evening")},  // 6pm today
-  {21, i18n_noop("tonight")}, // 9pm today
-  {33, i18n_noop("tomorrow morning")},  // 9am tomorrow
-  {36, i18n_noop("tomorrow afternoon")},  // 12pm tomorrow
-  {42, i18n_noop("tomorrow evening")},  // 6pm tomorrow
-  {45, i18n_noop("tomorrow night")},  // 9pm tomorrow
-  {57, i18n_noop("the day after tomorrow")}, // starting 9am 2 days from now
-  {72, i18n_noop("the day after tomorrow")}, // ends midnight 2 days from now
-  {73, i18n_noop("the foreseeable future")},  // Catchall for beyond 3 days
+    {0, i18n_noop("this morning")},             // anything before 12pm of the current day
+    {12, i18n_noop("this afternoon")},          // 12pm today
+    {18, i18n_noop("this evening")},            // 6pm today
+    {21, i18n_noop("tonight")},                 // 9pm today
+    {33, i18n_noop("tomorrow morning")},        // 9am tomorrow
+    {36, i18n_noop("tomorrow afternoon")},      // 12pm tomorrow
+    {42, i18n_noop("tomorrow evening")},        // 6pm tomorrow
+    {45, i18n_noop("tomorrow night")},          // 9pm tomorrow
+    {57, i18n_noop("the day after tomorrow")},  // starting 9am 2 days from now
+    {72, i18n_noop("the day after tomorrow")},  // ends midnight 2 days from now
+    {73, i18n_noop("the foreseeable future")},  // Catchall for beyond 3 days
 };
 
 //! Daypart string is used internally for battery popups

@@ -10,7 +10,7 @@
 #include "system/reboot_reason.h"
 #include "system/reset.h"
 
-#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#if defined(CONFIG_SOC_RP2350)
 #include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
 #endif
 
@@ -20,7 +20,7 @@
 #include "FreeRTOS.h"
 #endif
 
-#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#if defined(CONFIG_SOC_RP2350)
 static FruitJamBootProgressStage prv_fruitjam_stage_from_reboot_reason(
     RebootReasonCode reason_code) {
   switch (reason_code) {

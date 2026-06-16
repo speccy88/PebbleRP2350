@@ -3,10 +3,12 @@
 
 #include <stdint.h>
 
-#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
 #include "soc/rp2350/rp2350/fruitjam_bootsel.h"
-#include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
+#include "soc/rp2350/rp2350/hardware/clocks.h"
 #include "system/reboot_reason.h"
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
 
 static void prv_fruitjam_early_lcd_smoke(void) {
   RebootReason reason;
@@ -24,12 +26,28 @@ static void prv_fruitjam_early_lcd_smoke(void) {
 
   fruitjam_boot_progress_show(FruitJamBootProgressStageEarly);
 }
+#else
+static void prv_rp2350_bootsel_guard(void) {
+  RebootReason reason;
+  reboot_reason_get(&reason);
+
+  if (fruitjam_bootsel_should_enter_after_unsafe_boot(&reason)) {
+    fruitjam_bootsel_clear_fault_state();
+    fruitjam_bootsel_enter();
+  }
+}
 #endif
 
 uint32_t SystemCoreClock = 150000000;
 
 void soc_early_init(void) {
+#if defined(CONFIG_BOARD_PICO2_W_RP2350)
+  (void)rp2350_runtime_clocks_init(true);
+#endif
+
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
   prv_fruitjam_early_lcd_smoke();
+#else
+  prv_rp2350_bootsel_guard();
 #endif
 }

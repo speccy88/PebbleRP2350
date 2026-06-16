@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 Core Devices LLC */
 /* SPDX-License-Identifier: Apache-2.0 */
 
-#include "soc/rp2350/rp2350/fruitjam_esp.h"
+#include "soc/rp2350/rp2350/rp2350_bluetooth_hci.h"
 
 #include <kernel/pebble_tasks.h>
 #include <soc/rp2350/rp2350/fruitjam_boot_progress.h>
@@ -91,14 +91,12 @@ static const struct hci_h4_allocators s_hci_h4_allocs_from_ll = {
 };
 
 static int prv_hci_frame_cb(uint8_t pkt_type, void *data) {
-  fruitjam_esp_hci_debug_record_h4_frame(pkt_type);
+  rp2350_bluetooth_hci_debug_record_h4_frame(pkt_type);
   switch (pkt_type) {
-    case HCI_H4_EVT:
-      {
-        const struct ble_hci_ev *ev = data;
-        fruitjam_esp_hci_debug_record_event((const uint8_t *)ev,
-                                            sizeof(*ev) + ev->length);
-      }
+    case HCI_H4_EVT: {
+      const struct ble_hci_ev *ev = data;
+      rp2350_bluetooth_hci_debug_record_event((const uint8_t *)ev, sizeof(*ev) + ev->length);
+    }
       return ble_transport_to_hs_evt(data);
     case HCI_H4_ACL:
       return ble_transport_to_hs_acl(data);
@@ -119,9 +117,9 @@ static void prv_hci_task_main(void *unused) {
     uint8_t byte;
     uint32_t burst_count = 0;
 
-    while (fruitjam_esp_hci_read_byte(&byte)) {
+    while (rp2350_bluetooth_hci_read_byte(&byte)) {
       if (prv_h4_waiting_for_packet_type() && !prv_h4_controller_packet_type_valid(byte)) {
-        fruitjam_esp_hci_debug_record_h4_discard(byte);
+        rp2350_bluetooth_hci_debug_record_h4_discard(byte);
         if (s_h4_discard_count == 0U) {
           fruitjam_boot_progress_mark_label(FruitJamBootProgressStageBluetoothStart, "HCI DROP");
         }
@@ -134,7 +132,7 @@ static void prv_hci_task_main(void *unused) {
 
       const int consumed = hci_h4_sm_rx(&s_hci_h4sm, &byte, 1U);
       if (consumed <= 0) {
-        fruitjam_esp_hci_debug_record_h4_parse_error(consumed);
+        rp2350_bluetooth_hci_debug_record_h4_parse_error(consumed);
         fruitjam_boot_progress_mark_label(FruitJamBootProgressStageBluetoothStart, "HCI RXERR");
         PBL_LOG_D_ERR(LOG_DOMAIN_BT_STACK, "hci_h4_sm_rx returned %d", consumed);
         hci_h4_sm_init(&s_hci_h4sm, &s_hci_h4_allocs_from_ll, prv_hci_frame_cb);
@@ -154,8 +152,9 @@ static void prv_hci_task_main(void *unused) {
 void ble_transport_ll_reinit(void) {
   fruitjam_boot_progress_mark_label(FruitJamBootProgressStageBluetoothStart, "HCI INIT");
   hci_h4_sm_init(&s_hci_h4sm, &s_hci_h4_allocs_from_ll, prv_hci_frame_cb);
-  fruitjam_esp_hci_init();
+  rp2350_bluetooth_hci_init();
   fruitjam_boot_progress_mark_label(FruitJamBootProgressStageBluetoothStart, "HCI RUN");
+  PBL_LOG_D_DBG(LOG_DOMAIN_BT_STACK, "RP2350 HCI backend: %s", rp2350_bluetooth_hci_backend_name());
 }
 
 void ble_transport_ll_init(void) {
@@ -178,11 +177,11 @@ void ble_transport_ll_init(void) {
 }
 
 void ble_transport_ll_deinit(void) {
-  fruitjam_esp_hci_deinit();
+  rp2350_bluetooth_hci_deinit();
 }
 
 static bool prv_write_h4_packet(uint8_t type, const uint8_t *data, size_t length) {
-  return fruitjam_esp_hci_write(&type, 1U) && fruitjam_esp_hci_write(data, length);
+  return rp2350_bluetooth_hci_write(&type, 1U) && rp2350_bluetooth_hci_write(data, length);
 }
 
 int ble_transport_to_ll_cmd_impl(void *buf) {
@@ -190,10 +189,9 @@ int ble_transport_to_ll_cmd_impl(void *buf) {
   int err = 0;
   const uint16_t opcode = cmd->opcode;
   const uint8_t length = cmd->length;
-  const bool ok = prv_write_h4_packet(HCI_H4_CMD, (const uint8_t *)cmd,
-                                      sizeof(*cmd) + cmd->length);
+  const bool ok = prv_write_h4_packet(HCI_H4_CMD, (const uint8_t *)cmd, sizeof(*cmd) + cmd->length);
 
-  fruitjam_esp_hci_debug_record_cmd(opcode, length, ok);
+  rp2350_bluetooth_hci_debug_record_cmd(opcode, length, ok);
   if (!ok) {
     PBL_LOG_D_ERR(LOG_DOMAIN_BT_STACK, "Failed to write HCI CMD");
     err = BLE_ERR_MEM_CAPACITY;
@@ -204,12 +202,12 @@ int ble_transport_to_ll_cmd_impl(void *buf) {
 }
 
 static bool prv_write_mbuf_chain(uint8_t type, struct os_mbuf *om) {
-  if (!fruitjam_esp_hci_write(&type, 1U)) {
+  if (!rp2350_bluetooth_hci_write(&type, 1U)) {
     return false;
   }
 
   for (struct os_mbuf *x = om; x != NULL; x = SLIST_NEXT(x, om_next)) {
-    if (!fruitjam_esp_hci_write(x->om_data, x->om_len)) {
+    if (!rp2350_bluetooth_hci_write(x->om_data, x->om_len)) {
       return false;
     }
   }

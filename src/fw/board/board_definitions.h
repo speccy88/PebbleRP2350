@@ -18,6 +18,8 @@
 #include "boards/board_qemu_gabbro.h"
 #elif defined(CONFIG_BOARD_FRUITJAM_RP2350)
 #include "boards/board_fruitjam_rp2350.h"
+#elif defined(CONFIG_BOARD_PICO2_W_RP2350)
+#include "boards/board_pico2_w_rp2350.h"
 #else
 #error "Unknown board definition"
 #endif

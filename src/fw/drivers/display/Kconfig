@@ -24,12 +24,21 @@ config DISPLAY_SHARP_LS013B7DH01_RP2350
     help
       Support for the Sharp LS013B7DH01 display via RP2350.
 
-config DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT
-    bool "Use experimental RP2350 SPI1 transport for Sharp display"
+config DISPLAY_SHARP_LS013B7DH01_RP2350_HARDWARE_SPI
+    bool "Use RP2350 hardware SPI transport for Sharp display"
     depends on DISPLAY_SHARP_LS013B7DH01_RP2350
+    default y
     help
-      Use RP2350 SPI1 for the Sharp display instead of the hardware-verified
-      bit-banged transport.
+      Use the board-selected RP2350 SPI peripheral for normal Sharp Memory LCD
+      updates. Disable this only when falling back to the slower GPIO transport
+      for display bring-up diagnostics.
+
+config DISPLAY_SHARP_LS013B7DH01_RP2350_SPI_DIAGNOSTIC_PATTERN
+    bool "Show RP2350 Sharp display SPI diagnostic pattern"
+    depends on DISPLAY_SHARP_LS013B7DH01_RP2350_HARDWARE_SPI
+    help
+      Show a visible vertical/X-pattern after display initialization so the
+      hardware SPI transport can be identified during bring-up.
 
 config DISPLAY_SHARP_LS013B7DH01_RP2350_BRINGUP_LOOP
     bool "Hold RP2350 Sharp display in bring-up test loop"

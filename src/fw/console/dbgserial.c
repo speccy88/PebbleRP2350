@@ -6,7 +6,7 @@
 #include "board/board.h"
 #include "drivers/uart.h"
 
-#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#if defined(CONFIG_SOC_RP2350)
 #include "soc/rp2350/rp2350/fruitjam_usb_debug.h"
 #endif
 
@@ -54,7 +54,7 @@ void dbgserial_putchar(uint8_t c) {
 
 void dbgserial_putchar_lazy(uint8_t c) {
   uart_write_byte(DBG_UART, c);
-#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#if defined(CONFIG_SOC_RP2350)
   fruitjam_usb_debug_putchar(c);
 #endif
 }

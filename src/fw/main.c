@@ -78,10 +78,15 @@
 #include "applib/ui/ui.h"
 #include "applib/ui/window_stack_private.h"
 
-#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#if defined(CONFIG_SOC_RP2350)
 #include "soc/rp2350/rp2350/fruitjam_bootsel.h"
+#define RP2350_BOOTSEL_ENTER() fruitjam_bootsel_enter()
+#else
+#define RP2350_BOOTSEL_ENTER() ((void)0)
+#endif
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
 #include "soc/rp2350/rp2350/fruitjam_boot_progress.h"
-#include "soc/rp2350/rp2350/fruitjam_usb_debug.h"
 #define FRUITJAM_BOOT_PROGRESS_SHOW(stage) fruitjam_boot_progress_show(stage)
 #define FRUITJAM_BOOT_PROGRESS_SHOW_LABEL(stage, label) \
   fruitjam_boot_progress_show_label((stage), (label))
@@ -92,7 +97,6 @@
 #define FRUITJAM_BOOT_PROGRESS_MARK_LABEL(stage, label) \
   fruitjam_boot_progress_mark_label((stage), (label))
 #define FRUITJAM_BOOTSEL_CLEAR_BOOT_LOOP_STRIKES() fruitjam_bootsel_clear_boot_loop_strikes()
-#define FRUITJAM_USB_DEBUG_INIT() fruitjam_usb_debug_init()
 #else
 #define FRUITJAM_BOOT_PROGRESS_SHOW(stage) ((void)0)
 #define FRUITJAM_BOOT_PROGRESS_SHOW_LABEL(stage, label) ((void)0)
@@ -101,6 +105,12 @@
 #define FRUITJAM_BOOT_PROGRESS_MARK(stage) ((void)0)
 #define FRUITJAM_BOOT_PROGRESS_MARK_LABEL(stage, label) ((void)0)
 #define FRUITJAM_BOOTSEL_CLEAR_BOOT_LOOP_STRIKES() ((void)0)
+#endif
+
+#if defined(CONFIG_SOC_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_usb_debug.h"
+#define FRUITJAM_USB_DEBUG_INIT() fruitjam_usb_debug_init()
+#else
 #define FRUITJAM_USB_DEBUG_INIT() ((void)0)
 #endif
 
@@ -188,6 +198,10 @@ static void dump_gpio_configuration_state(void) {
 int main(void) {
   soc_early_init();
 
+#if defined(CONFIG_RP2350_BOOTSEL_ON_MAIN)
+  RP2350_BOOTSEL_ENTER();
+#endif
+
   FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "01 VTOR");
   extern void * __ISR_VECTOR_TABLE__;  // Defined in linker script
   SCB->VTOR = (uint32_t)&__ISR_VECTOR_TABLE__;
@@ -214,6 +228,21 @@ int main(void) {
 
   FRUITJAM_BOOT_PROGRESS_WRITE_LABEL(FruitJamBootProgressStagePfsStart, "10 RTC");
   rtc_init();
+
+#if defined(CONFIG_RP2350_USB_POLLED_MAIN)
+  fruitjam_usb_debug_polled_main();
+  for (;;) {
+  }
+#endif
+
+#if defined(CONFIG_RP2350_USB_DEBUG_ONLY)
+  stop_mode_disable(InhibitorMain);
+  pwr_flash_power_down_stop_mode(true /* power_down */);
+  FRUITJAM_USB_DEBUG_INIT();
+  vTaskStartScheduler();
+  for (;;) {
+  }
+#endif
 
 #ifdef CONFIG_RECOVERY_FW
   boot_bit_clear(BOOT_BIT_RECOVERY_START_IN_PROGRESS);
@@ -444,10 +473,12 @@ static NOINLINE void prv_main_task_init(void) {
 
   // When there are new system resources waiting to be installed, this call
   // will actually install them:
-  FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageResourcesStart);
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageResourcesStart, "R00 RES");
   resource_init();
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageResourcesStart, "R01 SYS");
 
   system_resource_init();
+  FRUITJAM_BOOT_PROGRESS_MARK_LABEL(FruitJamBootProgressStageResourcesStart, "R02 OK");
   FRUITJAM_BOOT_PROGRESS_MARK(FruitJamBootProgressStageResourcesDone);
 
 #ifdef CONFIG_HRM

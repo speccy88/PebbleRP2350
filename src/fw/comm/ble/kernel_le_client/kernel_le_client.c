@@ -18,6 +18,11 @@
 #include "kernel/event_loop.h"
 #include "kernel/pbl_malloc.h"
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "pbl/services/new_timer/new_timer.h"
+#include "pbl/services/system_task.h"
+#endif
+
 #include "system/logging.h"
 #include "system/passert.h"
 #include "util/likely.h"
@@ -34,7 +39,15 @@
 
 #include <bluetooth/pebble_bt.h>
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_bt_debug.h"
+#endif
+
 #define MAX_SERVICE_INSTANCES (8)
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#define FRUITJAM_DISCOVERY_ERROR_RETRY_MAX 3U
+#define FRUITJAM_DISCOVERY_ERROR_RETRY_DELAY_MS 750U
+#endif
 
 //! Array indices for the different client "classes"
 enum {
@@ -167,6 +180,117 @@ static const KernelLEClient s_clients[KernelLEClientNum] = {
 #endif // UNITTEST
 };
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+static TimerID s_fruitjam_discovery_retry_timer = TIMER_INVALID_ID;
+static BTDeviceInternal s_fruitjam_discovery_retry_device;
+static uint8_t s_fruitjam_discovery_error_retries;
+static bool s_fruitjam_discovery_retry_pending;
+
+static void prv_fruitjam_reset_discovery_retry_state(void) {
+  s_fruitjam_discovery_error_retries = 0;
+  s_fruitjam_discovery_retry_pending = false;
+  if (s_fruitjam_discovery_retry_timer != TIMER_INVALID_ID) {
+    new_timer_stop(s_fruitjam_discovery_retry_timer);
+  }
+}
+
+static void prv_fruitjam_discovery_retry_cb(void *data) {
+  (void)data;
+
+  if (!s_fruitjam_discovery_retry_pending) {
+    return;
+  }
+
+  BTDeviceInternal device = s_fruitjam_discovery_retry_device;
+  s_fruitjam_discovery_retry_pending = false;
+
+  bool have_connection = false;
+  bool encrypted = false;
+  bool gateway = false;
+  bool in_progress = false;
+  bt_lock();
+  {
+    GAPLEConnection *connection = gap_le_connection_by_device(&device);
+    if (connection) {
+      have_connection = true;
+      encrypted = connection->is_encrypted;
+      gateway = connection->is_gateway;
+      in_progress = connection->gatt_is_service_discovery_in_progress;
+    }
+  }
+  bt_unlock();
+
+  if (!have_connection || in_progress) {
+    PBL_LOG_WRN("Fruit Jam BLE discovery retry skipped conn=%u progress=%u",
+                have_connection ? 1U : 0U, in_progress ? 1U : 0U);
+    return;
+  }
+
+  BTErrno retry_rc = gatt_client_discovery_discover_all(&device);
+  fruitjam_bt_debug_record_discovery_request(retry_rc);
+  PBL_LOG_WRN("Fruit Jam BLE discovery retry %u/%u rc=%d enc=%u gw=%u",
+              s_fruitjam_discovery_error_retries, FRUITJAM_DISCOVERY_ERROR_RETRY_MAX,
+              (int)retry_rc, encrypted ? 1U : 0U, gateway ? 1U : 0U);
+}
+
+static void prv_fruitjam_discovery_retry_timer_cb(void *data) {
+  (void)data;
+  system_task_add_callback(prv_fruitjam_discovery_retry_cb, NULL);
+}
+
+static bool prv_fruitjam_schedule_discovery_retry(
+    const PebbleBLEGATTClientServiceEventInfo *event_info) {
+  if (event_info->status < BTErrnoInternalErrorBegin ||
+      s_fruitjam_discovery_error_retries >= FRUITJAM_DISCOVERY_ERROR_RETRY_MAX) {
+    return false;
+  }
+
+  bool have_connection = false;
+  bool encrypted = false;
+  bool gateway = false;
+  bt_lock();
+  {
+    GAPLEConnection *connection = gap_le_connection_by_device(&event_info->device);
+    if (connection) {
+      have_connection = true;
+      encrypted = connection->is_encrypted;
+      gateway = connection->is_gateway;
+    }
+  }
+  bt_unlock();
+
+  if (!have_connection) {
+    return false;
+  }
+
+  if (s_fruitjam_discovery_retry_timer == TIMER_INVALID_ID) {
+    s_fruitjam_discovery_retry_timer = new_timer_create();
+  }
+  if (s_fruitjam_discovery_retry_timer == TIMER_INVALID_ID) {
+    return false;
+  }
+
+  s_fruitjam_discovery_retry_device = event_info->device;
+  s_fruitjam_discovery_retry_pending = true;
+  ++s_fruitjam_discovery_error_retries;
+
+  const bool scheduled =
+      new_timer_start(s_fruitjam_discovery_retry_timer, FRUITJAM_DISCOVERY_ERROR_RETRY_DELAY_MS,
+                      prv_fruitjam_discovery_retry_timer_cb, NULL, 0);
+  if (!scheduled) {
+    s_fruitjam_discovery_retry_pending = false;
+    return false;
+  }
+
+  PBL_LOG_WRN("Fruit Jam BLE discovery status %d; retry %u/%u in %ums enc=%u gw=%u",
+              (int)event_info->status, s_fruitjam_discovery_error_retries,
+              FRUITJAM_DISCOVERY_ERROR_RETRY_MAX,
+              (unsigned)FRUITJAM_DISCOVERY_ERROR_RETRY_DELAY_MS, encrypted ? 1U : 0U,
+              gateway ? 1U : 0U);
+  return true;
+}
+#endif
+
 static void prv_handle_services_removed(PebbleBLEGATTClientServicesRemoved *services_removed) {
   PebbleBLEGATTClientServiceHandles *service_remove_info = &services_removed->handles[0];
   for (int s = 0; s < services_removed->num_services_removed; s++) {
@@ -239,6 +363,9 @@ static void prv_handle_services_added(
       if (c == KernelLEClientPPoGATT) {
         // We are trying to track down an issue on iOS where PPoGATT doesn't get opened (PBL-40084)
         // This message should help us determine if iOS is publishing the service
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+        fruitjam_bt_debug_record_kernel_ppogatt_found();
+#endif
         PBL_LOG_INFO("Found an instance of %s at 0x%"PRIx16"-0x%"PRIx16"!",
                 client->debug_name, range.start, range.end);
       } else {
@@ -260,9 +387,20 @@ static void prv_handle_gatt_service_discovery_event(const PebbleBLEGATTClientSer
   }
   if (event_info->status != BTErrnoServiceDiscoveryDatabaseChanged &&
       event_info->status != BTErrnoOK) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    if (prv_fruitjam_schedule_discovery_retry(event_info)) {
+      return;
+    }
+#endif
     // gatt_client_discovery.c already logs errors for this condition
     return;
   }
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  if (event_info->status == BTErrnoOK) {
+    prv_fruitjam_reset_discovery_retry_state();
+  }
+#endif
 
   if (event_info->type != PebbleServicesRemoved) {
     // For removals, we log info in the handler routine
@@ -428,6 +566,9 @@ static void prv_handle_connection_event(const PebbleBLEConnectionEvent *event) {
           event->hci_reason, event->connected, event->bonding_id);
 
   const bool connected = event->connected;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_kernel_connection(connected);
+#endif
   // FIXME: When PPoGATT is supported add a check for active gateway
   // https://pebbletechnology.atlassian.net/browse/PBL-15277
   //
@@ -439,16 +580,27 @@ static void prv_handle_connection_event(const PebbleBLEConnectionEvent *event) {
   const BTDeviceInternal device = PebbleEventToBTDeviceInternal(event);
   if (connected) {
     PBL_LOG_DBG("Connected to Gateway!");
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    prv_fruitjam_reset_discovery_retry_state();
+#endif
 
     ancs_create();
     ams_create();
     ppogatt_create();
 
     gap_le_slave_reconnect_stop();
-    gatt_client_discovery_discover_all(&device);
+    BTErrno discovery_rc = gatt_client_discovery_discover_all(&device);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_discovery_request(discovery_rc);
+#else
+    (void)discovery_rc;
+#endif
 
   } else {
     PBL_LOG_DBG("Disconnected from Gateway!");
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    prv_fruitjam_reset_discovery_retry_state();
+#endif
     ppogatt_destroy();
     ams_destroy();
     ancs_destroy();
@@ -484,6 +636,9 @@ void kernel_le_client_handle_event(const PebbleEvent *e) {
 
 // -------------------------------------------------------------------------------------------------
 static void prv_connect_gateway_bonding(BTBondingID gateway_bonding) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_kernel_gateway_connect();
+#endif
   gap_le_slave_reconnect_start();
   gap_le_connect_connect_by_bonding(gateway_bonding, true /* auto_reconnect */,
                                  true /* is_pairing_required */, GAPLEClientKernel);
@@ -504,7 +659,13 @@ static void prv_cleanup_clients_kernel_main_cb(void *unused) {
 
 // -------------------------------------------------------------------------------------------------
 void kernel_le_client_handle_bonding_change(BTBondingID bonding, BtPersistBondingOp op) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  const bool is_gateway = bt_persistent_storage_is_ble_ancs_bonding(bonding);
+  fruitjam_bt_debug_record_kernel_bonding((uint8_t)bonding, op, is_gateway);
+  if (is_gateway) {
+#else
   if (bt_persistent_storage_is_ble_ancs_bonding(bonding)) {
+#endif
     if (op == BtPersistBondingOpWillDelete) {
       prv_cancel_connect_gateway_bonding(bonding);
     } else if (op == BtPersistBondingOpDidAdd) {

@@ -13,6 +13,8 @@ typedef enum {
 
 void bt_ctl_init(void);
 
+bool bt_ctl_is_initialized(void);
+
 //! returns the airplane mode state
 bool bt_ctl_is_airplane_mode_on(void);
 

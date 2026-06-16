@@ -29,10 +29,15 @@ void mfg_info_get_pcba_serialnumber(char *pcba_serial_number, size_t pcba_serial
 }
 
 void mfg_info_get_hw_version(char *hw_version, size_t hw_version_size) {
-  strncpy(hw_version, mfg_get_hw_version(), hw_version_size);
+  const char *version = mfg_get_hw_version();
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+  if (strncmp(version, "XXXXXXXX", MFG_HW_VERSION_SIZE) == 0) {
+    version = "asterix";
+  }
+#endif
+  strncpy(hw_version, version, hw_version_size);
   if (hw_version_size > MFG_HW_VERSION_SIZE) {
     // same assumption as in mfg_info_get_pcba_serialnumber
     hw_version[MFG_HW_VERSION_SIZE] = '\0';
   }
 }
-

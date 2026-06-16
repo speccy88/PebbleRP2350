@@ -82,6 +82,18 @@ elif bld.env.CONFIG_BOARD_FRUITJAM_RP2350:
             'drivers',
         ],
     )
+elif bld.env.CONFIG_BOARD_PICO2_W_RP2350:
+    bld.objects(
+        name='board',
+        source=[
+            'boards/board_pico2_w_rp2350.c',
+        ],
+        use=[
+            'fw_includes',
+            'freertos',
+            'drivers',
+        ],
+    )
 else:
     bld.fatal('src/fw/board/wscript_build: Unknown board {}'.format(bld.env.BOARD))
 

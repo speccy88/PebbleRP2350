@@ -8,6 +8,7 @@ import glob
 import os
 import select
 import struct
+import subprocess
 import sys
 import termios
 import time
@@ -154,13 +155,35 @@ def capture_frame(port: str, output: str, pbm_output: str | None, timeout: float
         os.close(fd)
 
 
+def run_as_child(total_timeout: float) -> int:
+    env = os.environ.copy()
+    env["FRUITJAM_CDC_FRAME_CHILD"] = "1"
+    proc = subprocess.Popen([sys.executable, __file__, *sys.argv[1:]], env=env)
+    try:
+        return proc.wait(timeout=total_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        print(f"Timed out after {total_timeout:.1f}s; serial port may be wedged", file=sys.stderr)
+        return 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture a Fruit Jam PebbleOS LCD frame over USB CDC")
     parser.add_argument("-p", "--port", default=None, help="USB CDC device, e.g. /dev/cu.usbmodem101")
     parser.add_argument("-o", "--output", default="/tmp/fruitjam_frame.png", help="Output .png or .pbm path")
     parser.add_argument("--pbm", default=None, help="Optional extra raw PBM output path")
     parser.add_argument("--timeout", type=float, default=5.0, help="Read timeout in seconds")
+    parser.add_argument(
+        "--open-timeout",
+        type=float,
+        default=3.0,
+        help="Fail if opening the serial port takes longer than this many seconds",
+    )
     args = parser.parse_args()
+
+    if os.environ.get("FRUITJAM_CDC_FRAME_CHILD") != "1":
+        return run_as_child(args.timeout + args.open_timeout + 1.0)
 
     capture_frame(args.port or find_port(), args.output, args.pbm, args.timeout)
     return 0

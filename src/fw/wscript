@@ -136,7 +136,10 @@ def _generate_memory_layout(bld):
             fw_max_size = flash_size
     elif bld.env.CONFIG_SOC_RP2350:
         offset_size = 0
-        flash_size = 16 * 1024 * 1024
+        if bld.env.CONFIG_BOARD_PICO2_W_RP2350:
+            flash_size = 4 * 1024 * 1024
+        else:
+            flash_size = 16 * 1024 * 1024
         fw_max_size = flash_size
 
     if bld.env.CONFIG_QEMU:
@@ -394,7 +397,9 @@ def _get_mfg_paths(bld):
     elif bld.env.CONFIG_BOARD_FAMILY_GETAFIX:
         return ('mfg/getafix',)
     elif bld.env.CONFIG_BOARD_FAMILY_FRUITJAM:
-        return ('mfg/qemu',)
+        return ('mfg/fruitjam_rp2350',)
+    elif bld.env.CONFIG_BOARD_FAMILY_PICO2_W:
+        return ('mfg/pico2_w_rp2350',)
     else:
         bld.fatal('No MFG configuration for board %s' % bld.env.BOARD)
 

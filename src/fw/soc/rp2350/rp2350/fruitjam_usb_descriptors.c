@@ -7,7 +7,6 @@
 #include <string.h>
 
 #define USB_VID 0xcafe
-#define USB_PID 0x4020
 #define USB_BCD 0x0200
 
 enum {
@@ -29,6 +28,16 @@ enum {
 #define EPNUM_CDC_IN 0x82
 
 #define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
+
+#if defined(CONFIG_BOARD_PICO2_W_RP2350)
+#define USB_PID 0x4021
+#define RP2350_USB_PRODUCT "Pico 2 W PebbleOS Debug"
+#define RP2350_USB_SERIAL "PICO2WRP2350"
+#else
+#define USB_PID 0x4020
+#define RP2350_USB_PRODUCT "Fruit Jam PebbleOS Debug"
+#define RP2350_USB_SERIAL "FJRP2350"
+#endif
 
 static tusb_desc_device_t const s_device_descriptor = {
   .bLength = sizeof(tusb_desc_device_t),
@@ -55,24 +64,40 @@ static uint8_t const s_configuration_descriptor[] = {
 
 static char const *const s_string_descriptors[] = {
   [STRID_MANUFACTURER] = "Core Devices",
-  [STRID_PRODUCT] = "Fruit Jam PebbleOS Debug",
-  [STRID_SERIAL] = "FJRP2350",
+  [STRID_PRODUCT] = RP2350_USB_PRODUCT,
+  [STRID_SERIAL] = RP2350_USB_SERIAL,
   [STRID_CDC] = "PebbleOS CDC",
 };
 
 static uint16_t s_string_descriptor[32];
+static volatile uint32_t s_device_descriptor_count;
+static volatile uint32_t s_configuration_descriptor_count;
+static volatile uint32_t s_string_descriptor_count;
+
+static uint32_t prv_saturate_u8(uint32_t value) {
+  return value > 0xffU ? 0xffU : value;
+}
+
+uint32_t fruitjam_usb_descriptor_debug_word(void) {
+  return prv_saturate_u8(s_device_descriptor_count) |
+         (prv_saturate_u8(s_configuration_descriptor_count) << 8U) |
+         (prv_saturate_u8(s_string_descriptor_count) << 16U);
+}
 
 uint8_t const *tud_descriptor_device_cb(void) {
+  ++s_device_descriptor_count;
   return (uint8_t const *)&s_device_descriptor;
 }
 
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index) {
   (void)index;
+  ++s_configuration_descriptor_count;
   return s_configuration_descriptor;
 }
 
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
   (void)langid;
+  ++s_string_descriptor_count;
 
   uint8_t count;
   if (index == STRID_LANGID) {

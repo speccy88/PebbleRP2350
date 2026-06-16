@@ -4,6 +4,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <cmsis_core.h>
@@ -35,4 +36,8 @@ static inline void irq_set_enabled(int irq_num, bool enabled) {
   } else {
     NVIC_DisableIRQ((IRQn_Type)irq_num);
   }
+}
+
+static inline void irq_set_priority(int irq_num, uint8_t hardware_priority) {
+  NVIC_SetPriority((IRQn_Type)irq_num, hardware_priority >> (8U - __NVIC_PRIO_BITS));
 }

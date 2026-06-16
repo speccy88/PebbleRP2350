@@ -3,6 +3,7 @@
 
 #include "drivers/flash/flash_impl.h"
 
+#include "soc/rp2350/rp2350/hardware/timer.h"
 #include "util/attributes.h"
 
 #include <cmsis_core.h>
@@ -71,6 +72,13 @@ static const FlashSecurityRegisters s_security_regs = {
 static uint8_t s_page_buffer[RP2350_PAGE_SIZE] ALIGN(4);
 static status_t s_last_write_status = S_SUCCESS;
 static status_t s_last_erase_status = S_SUCCESS;
+static volatile uint32_t s_xip_ops;
+static volatile uint32_t s_xip_program_ops;
+static volatile uint32_t s_xip_erase_ops;
+static volatile uint32_t s_xip_last_block_us;
+static volatile uint32_t s_xip_max_block_us;
+static volatile uint32_t s_xip_last_offset;
+static volatile uint32_t s_xip_last_count;
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
@@ -106,6 +114,7 @@ static status_t RAMFUNC prv_flash_op(FlashOp op, uint32_t offset,
                                      const uint8_t *data, size_t count,
                                      uint32_t erase_size,
                                      uint8_t erase_cmd) {
+  const uint32_t start_us = time_us_32();
   RomConnectInternalFlashFn connect =
       (RomConnectInternalFlashFn)prv_rom_func_lookup(ROM_FUNC_CONNECT_INTERNAL_FLASH);
   RomFlashExitXipFn exit_xip = (RomFlashExitXipFn)prv_rom_func_lookup(ROM_FUNC_FLASH_EXIT_XIP);
@@ -147,6 +156,20 @@ static status_t RAMFUNC prv_flash_op(FlashOp op, uint32_t offset,
   __DSB();
   __ISB();
   __set_PRIMASK(primask);
+
+  const uint32_t elapsed_us = time_us_32() - start_us;
+  ++s_xip_ops;
+  if (op == FlashOpErase) {
+    ++s_xip_erase_ops;
+  } else {
+    ++s_xip_program_ops;
+  }
+  s_xip_last_block_us = elapsed_us;
+  if (elapsed_us > s_xip_max_block_us) {
+    s_xip_max_block_us = elapsed_us;
+  }
+  s_xip_last_offset = offset;
+  s_xip_last_count = count;
 
   return S_SUCCESS;
 }
@@ -384,4 +407,15 @@ status_t flash_impl_write_security_register(uint32_t addr, uint8_t val) {
 
 const FlashSecurityRegisters *flash_impl_security_registers_info(void) {
   return &s_security_regs;
+}
+
+void flash_impl_get_debug_info(FlashDebugInfo *info) {
+  info->backend_is_rp2350_xip = true;
+  info->xip_ops = s_xip_ops;
+  info->xip_program_ops = s_xip_program_ops;
+  info->xip_erase_ops = s_xip_erase_ops;
+  info->xip_last_block_us = s_xip_last_block_us;
+  info->xip_max_block_us = s_xip_max_block_us;
+  info->xip_last_offset = s_xip_last_offset;
+  info->xip_last_count = s_xip_last_count;
 }

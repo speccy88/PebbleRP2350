@@ -13,6 +13,21 @@
 
 #define FLASH_REGION_BASE_ADDRESS 0x10000000
 
+#if defined(CONFIG_BOARD_PICO2_W_RP2350)
+#define FLASH_REGION_DEF(MACRO, arg)                                                        \
+  MACRO(PTABLE,                  0x0010000 /*    64K */, arg) /* 0x10000000 - 0x1000FFFF */ \
+  MACRO(BOOTLOADER,              0x0010000 /*    64K */, arg) /* 0x10010000 - 0x1001FFFF */ \
+  MACRO(FIRMWARE_SLOT_0,         0x0120000 /*  1152K */, arg) /* 0x10020000 - 0x1013FFFF */ \
+  MACRO(FIRMWARE_SLOT_1,         0x0010000 /*    64K */, arg) /* 0x10140000 - 0x1014FFFF */ \
+  MACRO(SYSTEM_RESOURCES_BANK_0, 0x00C0000 /*   768K */, arg) /* 0x10150000 - 0x1020FFFF */ \
+  MACRO(SYSTEM_RESOURCES_BANK_1, 0x00C0000 /*   768K */, arg) /* 0x10210000 - 0x102CFFFF */ \
+  MACRO(SAFE_FIRMWARE,           0x0010000 /*    64K */, arg) /* 0x102D0000 - 0x102DFFFF */ \
+  MACRO(FILESYSTEM,              0x0100000 /*  1024K */, arg) /* 0x102E0000 - 0x103DFFFF */ \
+  MACRO(DEBUG_DB,                0x0010000 /*    64K */, arg) /* 0x103E0000 - 0x103EFFFF */ \
+  MACRO(RSVD1,                   0x000E000 /*    56K */, arg) /* 0x103F0000 - 0x103FDFFF */ \
+  MACRO(MFG_INFO,                0x0001000 /*     4K */, arg) /* 0x103FE000 - 0x103FEFFF */ \
+  MACRO(SHARED_PRF_STORAGE,      0x0001000 /*     4K */, arg) /* 0x103FF000 - 0x103FFFFF */
+#else
 #define FLASH_REGION_DEF(MACRO, arg)                                                        \
   MACRO(PTABLE,                  0x0010000 /*    64K */, arg) /* 0x10000000 - 0x1000FFFF */ \
   MACRO(BOOTLOADER,              0x0010000 /*    64K */, arg) /* 0x10010000 - 0x1001FFFF */ \
@@ -27,6 +42,7 @@
   MACRO(RSVD2,                   0x000F000 /*    60K */, arg) /* 0x10FEF000 - 0x10FFDFFF */ \
   MACRO(MFG_INFO,                0x0001000 /*     4K */, arg) /* 0x10FFE000 - 0x10FFEFFF */ \
   MACRO(SHARED_PRF_STORAGE,      0x0001000 /*     4K */, arg) /* 0x10FFF000 - 0x10FFFFFF */
+#endif
 
 #include "flash_region_def_helper.h"
 
@@ -68,4 +84,8 @@
 #define BOARD_NOR_FLASH_SIZE (FLASH_REGION_START_ADDR(_COUNT) - FLASH_REGION_BASE_ADDRESS)
 
 FLASH_REGION_SIZE_CHECK(SUBSECTOR_SIZE_BYTES)
+#if defined(CONFIG_BOARD_PICO2_W_RP2350)
+_Static_assert(BOARD_NOR_FLASH_SIZE == 0x400000, "Pico 2 W flash size should be 4mb");
+#else
 _Static_assert(BOARD_NOR_FLASH_SIZE == 0x1000000, "Flash size should be 16mb");
+#endif

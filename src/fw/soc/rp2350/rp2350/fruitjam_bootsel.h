@@ -6,8 +6,11 @@
 #include "system/reboot_reason.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 
 void fruitjam_bootsel_enter(void) __attribute__((noreturn));
+void fruitjam_bootsel_enter_with_params(uint32_t param0, uint32_t param1)
+    __attribute__((noreturn));
 bool fruitjam_bootsel_should_enter_after_unsafe_boot(const RebootReason *reason);
 void fruitjam_bootsel_clear_boot_loop_strikes(void);
 void fruitjam_bootsel_clear_fault_state(void);

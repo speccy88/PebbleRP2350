@@ -435,7 +435,9 @@ static void prv_load_data_from_prf(void) {
 
 BtPersistBondingType prv_get_type_for_id(BTBondingID id) {
   BtPersistBondingData data;
-  prv_file_get(&id, sizeof(id), &data, sizeof(data));
+  if (!prv_file_get(&id, sizeof(id), &data, sizeof(data))) {
+    return BtPersistBondingNumTypes;
+  }
 
   return data.type;
 }
@@ -1501,6 +1503,7 @@ void bt_persistent_storage_delete_all_pairings(void) {
     status_t rv = settings_file_open(&fd, BT_PERSISTENT_STORAGE_FILE_NAME,
                                      BT_PERSISTENT_STORAGE_FILE_SIZE);
     if (rv) {
+      prv_unlock();
       return;
     }
 
@@ -1509,7 +1512,9 @@ void bt_persistent_storage_delete_all_pairings(void) {
   }
   prv_unlock();
 
+  bt_persistent_storage_set_active_gateway(BT_BONDING_ID_INVALID);
   shared_prf_storage_erase_ble_pairing_data();
+  bt_pairability_update_due_to_bonding_change();
 }
 
 static void prv_dump_bonding_db_data(char display_buf[DISPLAY_BUF_LEN],

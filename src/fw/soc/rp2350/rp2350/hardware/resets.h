@@ -12,6 +12,7 @@
 #define RP2350_REG_ALIAS_CLR_BITS 0x3000UL
 
 #define RESETS_RESET_PLL_USB_BITS (1UL << 15)
+#define RESETS_RESET_PLL_SYS_BITS (1UL << 14)
 #define RESETS_RESET_USBCTRL_BITS (1UL << 28)
 
 #define RP2350_REG32(addr) (*(volatile uint32_t *)(addr))

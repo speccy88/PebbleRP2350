@@ -90,6 +90,30 @@ elif bld.env.CONFIG_BOARD_FAMILY_FRUITJAM:
             'pbl_includes',
         ],
     )
+elif bld.env.CONFIG_BOARD_FAMILY_PICO2_W:
+    bld.env.DRIVERS.extend([
+        'driver_pico2_w_stubs',
+        'driver_button',
+        'driver_mcu',
+        'driver_mpu',
+        'driver_otp',
+        'driver_pwr',
+        'driver_task_watchdog',
+    ])
+
+    bld.objects(
+        name='driver_pico2_w_stubs',
+        source=[
+            'stubs/accel.c',
+            'stubs/ambient_light.c',
+            'stubs/backlight.c',
+            'stubs/vibe.c',
+        ],
+        use=[
+            'fw_includes',
+            'pbl_includes',
+        ],
+    )
 ## ----------
 
 if bld.env.CONFIG_SPEAKER:

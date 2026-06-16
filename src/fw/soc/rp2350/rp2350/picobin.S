@@ -18,8 +18,27 @@ rp2350_picobin_block:
   .byte 0xff
   .hword (rp2350_picobin_block_end - rp2350_picobin_block - 16) / 4
   .byte 0x00
-  .word 0x00000000
+  .word rp2350_picobin_end_block - rp2350_picobin_block
 
   .word 0xab123579
 
 rp2350_picobin_block_end:
+
+.section .embedded_end_block, "a"
+.p2align 2
+
+rp2350_picobin_end_block:
+  .word 0xffffded3
+
+  .byte 0xfe
+  .byte 0x01
+  .hword 0x0000
+
+  .byte 0xff
+  .hword (rp2350_picobin_end_block_end - rp2350_picobin_end_block - 16) / 4
+  .byte 0x00
+  .word rp2350_picobin_block - rp2350_picobin_end_block
+
+  .word 0xab123579
+
+rp2350_picobin_end_block_end:

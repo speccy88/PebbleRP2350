@@ -101,6 +101,7 @@ def options(opt):
                              'qemu_flint',
                              'qemu_gabbro',
                              'fruitjam_rp2350',
+                             'pico2_w_rp2350',
                             ],
                    help='Which board we are targeting '
                         'asterix, obelix, getafix...')

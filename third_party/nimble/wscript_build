@@ -107,10 +107,11 @@ elif bld.env.CONFIG_SOC_SF32LB52:
 
 elif bld.env.CONFIG_SOC_RP2350:
     nimble_sources += [
-        'transport/hci_fruitjam_rp2350.c',
+        'transport/hci_rp2350.c',
     ]
     nimble_env.append_value('DEFINES', [
         'MYNEWT_VAL_BLE_HS_AUTO_START=0',
+        'MYNEWT_VAL_BLE_SM_SC=1',
     ])
 
 

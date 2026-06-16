@@ -13,11 +13,15 @@
 #include "comm/bt_lock.h"
 
 #include "kernel/event_loop.h"
+#include "pbl/services/bluetooth/local_id.h"
 #include "pbl/services/bluetooth/bluetooth_persistent_storage.h"
 #include "pbl/services/regular_timer.h"
 #include "util/size.h"
 
+#include <bluetooth/pebble_bt.h>
 #include <btutil/bt_uuid.h>
+
+#include <string.h>
 
 //! Reference to the reconnection advertising job.
 //! bt_lock() needs to be taken before accessing this variable.
@@ -26,15 +30,14 @@ static bool s_is_basic_reconnection_enabled;
 static bool s_is_hrm_reconnection_enabled;
 
 typedef enum {
-  ReconnectType_None,  // Not advertising for reconnection
-  ReconnectType_Plain, // Advertising for reconnection with empty payload
-  ReconnectType_BleHrm // Advertising for reconnection with HRM payload
+  ReconnectType_None,   // Not advertising for reconnection
+  ReconnectType_Plain,  // Advertising for reconnection with empty payload
+  ReconnectType_BleHrm  // Advertising for reconnection with HRM payload
 } ReconnectType;
 
 // -----------------------------------------------------------------------------
 //! Static, internal helper functions
-static void prv_advert_job_unscheduled_callback(GAPLEAdvertisingJobRef job,
-                                                bool completed,
+static void prv_advert_job_unscheduled_callback(GAPLEAdvertisingJobRef job, bool completed,
                                                 void *data) {
   // bt_lock() is still held for us by gap_le_advert
   s_reconnect_advert_job = NULL;
@@ -53,6 +56,28 @@ static ReconnectType prv_current_reconnect_type(void) {
   }
   return ReconnectType_None;
 }
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+static BLEAdData *prv_create_visible_reconnect_payload(void) {
+  BLEAdData *ad = ble_ad_create();
+  ble_ad_set_flags(
+      ad, GAP_LE_AD_FLAGS_GEN_DISCOVERABLE_MASK | GAP_LE_AD_FLAGS_BR_EDR_NOT_SUPPORTED_MASK);
+
+  Uuid service_uuid = bt_uuid_expand_16bit(PEBBLE_BT_PAIRING_SERVICE_UUID_16BIT);
+  ble_ad_set_service_uuids(ad, &service_uuid, 1);
+
+  char device_name[BT_DEVICE_NAME_BUFFER_SIZE];
+  bt_local_id_copy_device_name(device_name, true);
+  if (device_name[0] == '\0') {
+    strncpy(device_name, "Pebble RP2350", sizeof(device_name));
+    device_name[sizeof(device_name) - 1] = '\0';
+  }
+  ble_ad_set_local_name(ad, device_name);
+  ble_ad_set_tx_power_level(ad);
+
+  return ad;
+}
+#endif
 
 static void prv_unschedule_adv_if_needed(void) {
   if (prv_is_advertising_for_reconnection()) {
@@ -79,15 +104,22 @@ static void prv_evaluate(ReconnectType prev_type) {
 #endif
 
     BLEAdData *ad;
+    bool destroy_ad = false;
     if (use_hrm_payload) {
       // Create adv payload with only flags + HR service UUID. This is enough for various mobile
       // fitness apps to be able to reconnect to Pebble as BLE HRM.
       ad = ble_ad_create();
+      destroy_ad = true;
       // BLE-only watch: advertise "BR/EDR Not Supported" so dual-mode hosts use LE.
-      ble_ad_set_flags(ad, GAP_LE_AD_FLAGS_GEN_DISCOVERABLE_MASK |
-                           GAP_LE_AD_FLAGS_BR_EDR_NOT_SUPPORTED_MASK);
+      ble_ad_set_flags(
+          ad, GAP_LE_AD_FLAGS_GEN_DISCOVERABLE_MASK | GAP_LE_AD_FLAGS_BR_EDR_NOT_SUPPORTED_MASK);
       Uuid service_uuid = bt_uuid_expand_16bit(0x180D);
       ble_ad_set_service_uuids(ad, &service_uuid, 1);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+    } else {
+      ad = prv_create_visible_reconnect_payload();
+      destroy_ad = true;
+#else
     } else {
       // [MT] Advertise with an empty payload to save battery life with these
       // reconnection ad packets. This should be enough for the other
@@ -106,10 +138,11 @@ static void prv_evaluate(ReconnectType prev_type) {
       // still leave out the flags.
 
       static BLEAdData payload = {
-        .ad_data_length = 0,
-        .scan_resp_data_length = 0,
+          .ad_data_length = 0,
+          .scan_resp_data_length = 0,
       };
       ad = &payload;
+#endif
     }
 
     // Values chosen according to Apple Accessory Design Guidelines
@@ -128,7 +161,7 @@ static void prv_evaluate(ReconnectType prev_type) {
         ad, advert_terms, sizeof(advert_terms) / sizeof(GAPLEAdvertisingJobTerm),
         prv_advert_job_unscheduled_callback, NULL, GAPLEAdvertisingJobTagReconnection);
 
-    if (use_hrm_payload) {
+    if (destroy_ad) {
       ble_ad_destroy(ad);
     }
   } else {
@@ -154,7 +187,7 @@ void gap_le_slave_reconnect_stop(void) {
 // -----------------------------------------------------------------------------
 void gap_le_slave_reconnect_start(void) {
 #ifdef CONFIG_RECOVERY_FW
-  return; // Only use discoverable packet for PRF
+  return;  // Only use discoverable packet for PRF
 #endif
   bt_lock();
   {
@@ -202,8 +235,8 @@ void gap_le_slave_reconnect_hrm_restart(void) {
 
     // Always restart the timer:
     if (!regular_timer_is_scheduled(&s_hrm_reconnect_timer)) {
-      s_hrm_reconnect_timer = (RegularTimerInfo) {
-        .cb = prv_hrm_reconnect_timeout_timer_callback,
+      s_hrm_reconnect_timer = (RegularTimerInfo){
+          .cb = prv_hrm_reconnect_timeout_timer_callback,
       };
       regular_timer_add_multisecond_callback(&s_hrm_reconnect_timer, RECONNECT_HRM_TIMEOUT_SECS);
     }

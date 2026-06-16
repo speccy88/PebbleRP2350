@@ -108,6 +108,16 @@ typedef enum {
 
 #define MAX_BATCHED_PB_PUT_OPS 3
 
+#if defined(CONFIG_RP2350_PEBBLE_STORAGE_XIP_ERASE_HAZARD)
+#define PUT_BYTES_ENABLE_PREACK_DEFAULT false
+#define PUT_BYTES_ALLOCATED_PB_PUT_OPS 1
+#define PUT_BYTES_TRANSFER_RESPONSE_TIME ResponseTimeMiddle
+#else
+#define PUT_BYTES_ENABLE_PREACK_DEFAULT true
+#define PUT_BYTES_ALLOCATED_PB_PUT_OPS MAX_BATCHED_PB_PUT_OPS
+#define PUT_BYTES_TRANSFER_RESPONSE_TIME ResponseTimeMin
+#endif
+
 typedef struct {
   uint8_t *buffer;
   uint32_t request_length;
@@ -164,6 +174,7 @@ typedef struct {
 } PutBytesState;
 
 static PutBytesState s_pb_state;
+static PutBytesDebugInfo s_pb_debug;
 
 static struct InstallableObject {
   uint32_t token;
@@ -285,16 +296,17 @@ static bool prv_init_put_job_queue_if_necessary(void) {
     return true;
   }
 
-  put_jobs->enable_preack = true;
+  put_jobs->enable_preack = PUT_BYTES_ENABLE_PREACK_DEFAULT;
 
   int i;
-  for (i = 0; i < MAX_BATCHED_PB_PUT_OPS; i++) {
+  for (i = 0; i < PUT_BYTES_ALLOCATED_PB_PUT_OPS; i++) {
     // Note: If heap pressure becomes an issue, we could also consider only
     // using pre-acking if there is a certain amount of space free in the heap
     uint8_t *buffer = (uint8_t *) kernel_zalloc(PUT_BYTES_PP_BUFFER_SIZE);
     if (!buffer) {
       if (i == 0) {
         PBL_LOG_ERR("Not enough memory to service PB request, abort!");
+        s_pb_debug.prepare_fail_count++;
         prv_deinit_put_job_queue();
         return false;
       } if (i == 1) {
@@ -313,7 +325,7 @@ static bool prv_init_put_job_queue_if_necessary(void) {
 
 static void prv_set_responsiveness(ResponseTimeState state, uint16_t timeout_secs) {
   comm_session_set_responsiveness(comm_session_get_system_session(),
-                                  BtConsumerPpPutBytes, ResponseTimeMin, timeout_secs);
+                                  BtConsumerPpPutBytes, state, timeout_secs);
 }
 
 static void prv_send_nack_from_system_task(void *data) {
@@ -331,6 +343,7 @@ static void prv_add_nack_no_token_system_callback(void) {
 
 static void prv_cleanup(void) {
   PBL_LOG_INFO("Put bytes cleanup. Tok: %"PRIu32, s_pb_state.token);
+  s_pb_debug.cleanup_count++;
 
   prv_deinit_put_job_queue();
   s_pb_state.receiver = (__typeof__(s_pb_state.receiver)) {};
@@ -383,6 +396,7 @@ static void prv_cleanup_async(void) {
 }
 
 static void prv_fail(uint32_t token) {
+  s_pb_debug.fail_count++;
   prv_cleanup_async();
   prv_add_nack_system_callback(token);
 }
@@ -390,6 +404,7 @@ static void prv_fail(uint32_t token) {
 static void prv_timer_callback(void* data) {
   PBL_LOG_WRN("Put bytes Tok: %"PRIu32" timed out after %"PRIu32"ms, cleaning up.",
       s_pb_state.token, PUT_TIMEOUT_MS);
+  s_pb_debug.timeout_count++;
   prv_cleanup_async();
 }
 
@@ -424,6 +439,13 @@ static unsigned int prv_get_progress_percent(void) {
 }
 
 static void prv_send_response(ResponseCode code, uint32_t token) {
+  s_pb_debug.last_response_code = code;
+  if (code == ResponseAck) {
+    s_pb_debug.ack_count++;
+  } else if (code == ResponseNack) {
+    s_pb_debug.nack_count++;
+  }
+
   struct {
     uint8_t response_code;
     uint32_t token;
@@ -488,6 +510,8 @@ static void prv_finish_fw_update_if_completed(void) {
 }
 
 static void prv_do_install(uint32_t token) {
+  s_pb_debug.install_count++;
+
   struct InstallableObject* o = NULL;
   for (int i = 0; i < NumObjects; ++i) {
     if (s_ready_to_install[i].token == token) {
@@ -527,6 +551,7 @@ static void prv_do_install(uint32_t token) {
 
 static void prv_do_abort(void) {
   PBL_LOG_INFO("PutBytes abort CB. Tok: %"PRIu32".", s_pb_state.token);
+  s_pb_debug.abort_count++;
   prv_mark_pb_jobs_complete(1);
   prv_cleanup_and_send_response(ResponseAck);
 }
@@ -682,6 +707,8 @@ static bool prv_setup_storage_for_init_request(const InitRequest *request, uint3
 }
 
 static void prv_do_init(void) {
+  s_pb_debug.init_count++;
+
   bool success = false;
 
   InitRequest* request = (InitRequest*) s_pb_state.receiver.buffer;
@@ -735,6 +762,7 @@ static void prv_do_init(void) {
 
   if (!success) {
     PBL_LOG_WRN("Failed to init storage");
+    s_pb_debug.storage_init_fail_count++;
     goto exit;
   }
 
@@ -769,7 +797,11 @@ static bool prv_check_putrequest_for_errors(const PutRequest *request_hdr,
                                             uint32_t tot_request_size);
 
 static bool prv_do_put(const PutRequest *request, uint32_t request_size, uint32_t token) {
+  s_pb_debug.put_count++;
+  s_pb_debug.request_length = request_size;
+
   uint32_t data_length = ntohl(request->length);
+  s_pb_debug.last_data_length = data_length;
 
   xSemaphoreTake(s_pb_semaphore, portMAX_DELAY);
   uint32_t remaining_bytes = s_pb_state.remaining_bytes;
@@ -794,12 +826,16 @@ static bool prv_do_put(const PutRequest *request, uint32_t request_size, uint32_
 }
 
 static void prv_do_commit(void) {
+  s_pb_debug.commit_count++;
+
   uint32_t elapsed_time_ms = ticks_to_milliseconds(rtc_get_ticks() - s_pb_state.start_ticks);
 
   const CommitRequest *request = (const CommitRequest *)s_pb_state.receiver.buffer;
 
   uint32_t crc = ntohl(request->crc);
   uint32_t calculated_crc = pb_storage_calculate_crc(&s_pb_state.storage, PutBytesCrcType_Legacy);
+  s_pb_debug.last_expected_crc = crc;
+  s_pb_debug.last_crc = calculated_crc;
   bool commit_succeeded = (calculated_crc == crc);
 
   if (elapsed_time_ms > 0) {
@@ -819,6 +855,7 @@ static void prv_do_commit(void) {
   } else {
     PBL_LOG_ERR("PutBytes commit CB. Calculated CRC is 0x%"PRIx32" expected 0x%"PRIx32,
             calculated_crc, crc);
+    s_pb_debug.crc_fail_count++;
   }
 
   s_pb_state.is_success &= commit_succeeded;
@@ -972,6 +1009,7 @@ static void prv_process_msg_system_task_callback(void *unused) {
   }
 
   const PutBytesCommand cmd = s_pb_state.receiver.buffer[0];
+  s_pb_debug.last_command = cmd;
 
   // Validation:
   const uint32_t request_token =
@@ -1133,6 +1171,7 @@ static bool prv_take_lock_with_short_timeout(void) {
 static bool prv_prepare(size_t total_payload_length) {
   if (total_payload_length > PUT_BYTES_PP_BUFFER_SIZE) {
     PBL_LOG_ERR("Put Bytes message too big");
+    s_pb_debug.prepare_fail_count++;
     return false;
   }
 
@@ -1145,6 +1184,7 @@ static bool prv_prepare(size_t total_payload_length) {
   }
 
   if (prv_is_message_pending_processing()) {
+    s_pb_debug.prepare_fail_count++;
     return false;
   }
 
@@ -1170,6 +1210,7 @@ Receiver *prv_receiver_prepare(CommSession *session, const PebbleProtocolEndpoin
   }
 
   if (!success) {
+    s_pb_debug.prepare_fail_count++;
     prv_add_nack_no_token_system_callback();
     return NULL;
   }
@@ -1239,7 +1280,7 @@ void prv_receiver_finish(Receiver *receiver) {
   }
 
   // We are still processing PB data, keep the BT connection fast
-  prv_set_responsiveness(ResponseTimeMin, MIN_LATENCY_MODE_TIMEOUT_PUT_BYTES_SECS);
+  prv_set_responsiveness(PUT_BYTES_TRANSFER_RESPONSE_TIME, MIN_LATENCY_MODE_TIMEOUT_PUT_BYTES_SECS);
 
   prv_finalize_pb_job();
   if (prv_receiver_contains_put_request()) {
@@ -1260,6 +1301,47 @@ const ReceiverImplementation g_put_bytes_receiver_impl = {
   .finish = prv_receiver_finish,
   .cleanup = prv_receiver_cleanup,
 };
+
+void put_bytes_get_debug_info(PutBytesDebugInfo *info) {
+  if (!info) {
+    return;
+  }
+
+  *info = s_pb_debug;
+  info->lock_ok = false;
+
+  if (!s_pb_semaphore) {
+    return;
+  }
+
+  const TickType_t timeout_ticks = milliseconds_to_ticks(25);
+  if (xSemaphoreTake(s_pb_semaphore, timeout_ticks) != pdTRUE) {
+    return;
+  }
+
+  const PutBytesPendingJobs *put_jobs = &s_pb_state.pb_pending_jobs;
+  info->lock_ok = true;
+  info->token = s_pb_state.token;
+  info->index = s_pb_state.index;
+  info->total_size = s_pb_state.total_size;
+  info->remaining_bytes = s_pb_state.remaining_bytes;
+  info->append_offset = s_pb_state.append_offset;
+  info->current_offset = s_pb_state.storage.current_offset;
+  info->receiver_length = s_pb_state.receiver.length;
+  info->receiver_pos = s_pb_state.receiver.pos;
+  info->current_command = s_pb_state.current_command;
+  info->object_type = s_pb_state.type;
+  info->has_cookie = s_pb_state.has_cookie ? 1U : 0U;
+  info->is_success = s_pb_state.is_success ? 1U : 0U;
+  info->receiver_should_nack = s_pb_state.receiver.should_nack ? 1U : 0U;
+  info->pending_jobs = put_jobs->num_ops_pending;
+  info->allocated_jobs = put_jobs->num_allocated_pb_jobs;
+  info->read_idx = put_jobs->read_idx;
+  info->preack_enabled = put_jobs->enable_preack ? 1U : 0U;
+  info->ack_later = put_jobs->need_to_ack_later ? 1U : 0U;
+
+  xSemaphoreGive(s_pb_semaphore);
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // For Unit Testing

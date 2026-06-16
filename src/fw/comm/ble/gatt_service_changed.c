@@ -3,6 +3,7 @@
 
 #include "gatt_service_changed.h"
 
+#include "gatt_client_discovery.h"
 #include "gap_le_connection.h"
 
 #include "comm/bt_lock.h"
@@ -19,7 +20,6 @@
 #include <bluetooth/gatt.h>
 #include <btutil/bt_device.h>
 
-extern BTErrno gatt_client_discovery_rediscover_all(const BTDeviceInternal *device);
 extern void gatt_client_discovery_handle_service_range_change(GAPLEConnection *connection,
                                                               ATTHandleRange *range);
 extern void gatt_client_discovery_discover_range(GAPLEConnection *connection,

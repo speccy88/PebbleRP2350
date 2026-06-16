@@ -122,6 +122,22 @@ void clock_set_manual_time_source(bool manual);
 //! Does nothing if there is no active system session (phone not connected).
 void clock_request_time_from_phone(void);
 
+#if defined(CONFIG_SOC_RP2350)
+typedef struct ClockRp2350PhoneTimeDebug {
+  bool polling_enabled;
+  uint32_t poll_seconds;
+  uint32_t timer_count;
+  uint32_t request_count;
+  uint32_t no_session_count;
+  uint32_t skip_manual_count;
+  uint32_t skip_external_rtc_count;
+} ClockRp2350PhoneTimeDebug;
+
+//! @internal
+//! Copies RP2350 phone time request debug counters.
+void clock_rp2350_get_phone_time_debug(ClockRp2350PhoneTimeDebug *debug);
+#endif
+
 //! @internal
 //! If timezone is set, copies the current timezone long name (e.g. America/Chicago)
 //! to buffer region_name.

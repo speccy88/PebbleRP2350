@@ -37,6 +37,100 @@ config QEMU
       Derived alias for SOC_QEMU. Gates features that don't make
       sense under emulation.
 
+config RP2350_USB_DEBUG_ONLY
+    bool "RP2350 USB debug task only"
+    depends on SOC_RP2350
+    help
+      Bring up only the RP2350 USB debug task and the scheduler. This is a
+      board bring-up diagnostic for isolating failures before KernelMain.
+
+config RP2350_USB_POLLED_MAIN
+    bool "RP2350 polled USB debug from main"
+    depends on SOC_RP2350
+    help
+      Bring up TinyUSB directly from main without starting FreeRTOS. This is a
+      board bring-up diagnostic for separating low-level USB from scheduler and
+      runtime issues.
+
+config RP2350_BOOTSEL_ON_MAIN
+    bool "RP2350 enter BOOTSEL from main"
+    depends on SOC_RP2350
+    help
+      Immediately re-enter the RP2350 USB bootloader once main starts. This is
+      a board bring-up diagnostic for separating startup from scheduler issues.
+
+config RP2350_BOOTSEL_FROM_USB_TASK
+    bool "RP2350 enter BOOTSEL from USB debug task"
+    depends on SOC_RP2350
+    help
+      Re-enter the RP2350 USB bootloader once the USB debug task starts. This is
+      a board bring-up diagnostic for separating scheduler issues from USB init.
+
+config RP2350_BOOTSEL_AFTER_USB_CLOCK
+    bool "RP2350 enter BOOTSEL after USB clock init"
+    depends on SOC_RP2350
+    help
+      Re-enter the RP2350 USB bootloader once the USB debug task completes USB
+      clock setup. This localizes USB bring-up failures to clock setup or TinyUSB.
+
+config RP2350_BOOTSEL_AFTER_TUSB_INIT
+    bool "RP2350 enter BOOTSEL after TinyUSB init"
+    depends on SOC_RP2350
+    help
+      Re-enter the RP2350 USB bootloader after TinyUSB initialization completes.
+      This localizes USB bring-up failures to init or runtime servicing.
+
+config RP2350_BOOTSEL_AFTER_TUD_TASK
+    bool "RP2350 enter BOOTSEL after TinyUSB task"
+    depends on SOC_RP2350
+    help
+      Re-enter the RP2350 USB bootloader after one TinyUSB task poll. This
+      localizes USB bring-up failures to TinyUSB polling or later runtime code.
+
+config RP2350_BOOTSEL_AFTER_USB_LOOP
+    bool "RP2350 enter BOOTSEL after USB loop"
+    depends on SOC_RP2350
+    help
+      Re-enter the RP2350 USB bootloader after a short TinyUSB service loop.
+      This checks whether repeated TinyUSB polling and scheduler delays survive.
+
+config RP2350_BOOTSEL_AFTER_USB_REALTIME
+    bool "RP2350 enter BOOTSEL after timed USB service window"
+    depends on SOC_RP2350
+    help
+      Re-enter the RP2350 USB bootloader after servicing TinyUSB for a real-time
+      window. This gives the host time to enumerate while keeping the diagnostic
+      image recoverable without a physical BOOTSEL press.
+
+choice RP2350_PEBBLE_STORAGE_LOCATION
+    prompt "RP2350 Pebble storage location"
+    depends on SOC_RP2350 && FLASH
+    default RP2350_PEBBLE_STORAGE_ONBOARD_XIP
+    help
+      Select where mutable Pebble storage lives. Firmware still boots from the
+      RP2350 boot flash; this controls the resource banks and Pebble filesystem.
+
+config RP2350_PEBBLE_STORAGE_ONBOARD_XIP
+    bool "Onboard XIP flash"
+    help
+      Store system resources and the Pebble filesystem on the same flash chip
+      used for RP2350 execute-in-place firmware. This is useful for early
+      bring-up, but flash erase/program operations can stall the system.
+
+config RP2350_PEBBLE_STORAGE_EXTERNAL_NOR
+    bool "External NOR flash"
+    help
+      Store system resources and the Pebble filesystem on a separate 3.3 V NOR
+      flash device. This is the intended production direction for reliable app
+      installs and resource/filesystem updates.
+
+endchoice
+
+config RP2350_PEBBLE_STORAGE_XIP_ERASE_HAZARD
+    bool
+    depends on SOC_RP2350
+    default y if RP2350_PEBBLE_STORAGE_ONBOARD_XIP
+
 choice
     prompt "ARM Cortex core"
     default CORTEX_M4 if SOC_NRF52

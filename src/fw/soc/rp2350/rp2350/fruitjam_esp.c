@@ -5,6 +5,7 @@
 
 #include "board/board.h"
 #include "board/boards/board_fruitjam_rp2350.h"
+#include "soc/rp2350/rp2350/hardware/clocks.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,8 +18,6 @@
 #define IO_BANK0_BASE 0x40028000U
 #define PADS_BANK0_BASE 0x40038000U
 #define RESETS_BASE 0x40020000U
-#define CLOCKS_BASE 0x40010000U
-#define XOSC_BASE 0x40048000U
 #define UART1_BASE 0x40078000U
 #define SIO_BASE 0xd0000000U
 
@@ -37,23 +36,6 @@
 #define RESETS_RESET_OFFSET 0x00U
 #define RESETS_RESET_DONE_OFFSET 0x08U
 #define RESETS_RESET_UART1_BITS (1U << 27)
-
-#define CLOCKS_CLK_PERI_CTRL_OFFSET 0x48U
-#define CLOCKS_CLK_PERI_DIV_OFFSET 0x4cU
-#define CLOCKS_CLK_PERI_CTRL_ENABLE_BITS (1U << 11)
-#define CLOCKS_CLK_PERI_CTRL_ENABLED_BITS (1U << 28)
-#define CLOCKS_CLK_PERI_CTRL_AUXSRC_LSB 5U
-#define CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_XOSC_CLKSRC 0x4U
-#define CLOCKS_CLK_PERI_DIV_1 0x00010000U
-
-#define XOSC_CTRL_OFFSET 0x00U
-#define XOSC_STATUS_OFFSET 0x04U
-#define XOSC_STARTUP_OFFSET 0x0cU
-#define XOSC_CTRL_ENABLE_LSB 12U
-#define XOSC_CTRL_ENABLE_VALUE_ENABLE 0xfabU
-#define XOSC_CTRL_FREQ_RANGE_VALUE_1_15MHZ 0xaa0U
-#define XOSC_STATUS_STABLE_BITS (1U << 31)
-#define XOSC_STARTUP_DELAY_12MHZ 47U
 
 #define SIO_GPIO_IN_OFFSET 0x04U
 #define SIO_GPIO_HI_IN_OFFSET 0x08U
@@ -226,43 +208,6 @@ static void prv_gpio_set_function(uint8_t pin, uint32_t function) {
   REG32(IO_BANK0_GPIO_CTRL(pin)) = function;
 }
 
-static bool prv_wait_for_bits(uint32_t address, uint32_t mask, uint32_t value) {
-  const uint32_t k_timeout = 1000000U;
-  for (uint32_t i = 0; i < k_timeout; ++i) {
-    if ((REG32(address) & mask) == value) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static void prv_enable_xosc(void) {
-  if (REG32(XOSC_BASE + XOSC_STATUS_OFFSET) & XOSC_STATUS_STABLE_BITS) {
-    return;
-  }
-
-  REG32(XOSC_BASE + XOSC_CTRL_OFFSET) = XOSC_CTRL_FREQ_RANGE_VALUE_1_15MHZ;
-  REG32(XOSC_BASE + XOSC_STARTUP_OFFSET) = XOSC_STARTUP_DELAY_12MHZ;
-  REG32(XOSC_BASE + XOSC_CTRL_OFFSET) =
-      (XOSC_CTRL_ENABLE_VALUE_ENABLE << XOSC_CTRL_ENABLE_LSB) |
-      XOSC_CTRL_FREQ_RANGE_VALUE_1_15MHZ;
-  (void)prv_wait_for_bits(XOSC_BASE + XOSC_STATUS_OFFSET, XOSC_STATUS_STABLE_BITS,
-                          XOSC_STATUS_STABLE_BITS);
-}
-
-static void prv_enable_clk_peri_from_xosc(void) {
-  prv_enable_xosc();
-
-  REG32(CLOCKS_BASE + CLOCKS_CLK_PERI_CTRL_OFFSET) = 0U;
-  REG32(CLOCKS_BASE + CLOCKS_CLK_PERI_DIV_OFFSET) = CLOCKS_CLK_PERI_DIV_1;
-  REG32(CLOCKS_BASE + CLOCKS_CLK_PERI_CTRL_OFFSET) =
-      CLOCKS_CLK_PERI_CTRL_ENABLE_BITS |
-      (CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_XOSC_CLKSRC << CLOCKS_CLK_PERI_CTRL_AUXSRC_LSB);
-
-  while (!(REG32(CLOCKS_BASE + CLOCKS_CLK_PERI_CTRL_OFFSET) & CLOCKS_CLK_PERI_CTRL_ENABLED_BITS)) {
-  }
-}
-
 static void prv_uart1_reset(void) {
   REG32(RESETS_BASE + RESETS_RESET_OFFSET + REG_ALIAS_SET_BITS) = RESETS_RESET_UART1_BITS;
   prv_delay_cycles(64U);
@@ -308,7 +253,7 @@ static void prv_uart1_set_baud(uint32_t baud) {
 static void prv_uart1_init(void) {
   NVIC_DisableIRQ(UART1_IRQ_IRQn);
   prv_uart_rx_ring_reset();
-  prv_enable_clk_peri_from_xosc();
+  rp2350_clk_peri_enable_xosc();
   prv_uart1_reset();
   prv_uart1_disable_rx_irq();
 

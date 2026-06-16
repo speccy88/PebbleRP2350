@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Core Devices LLC
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_PICO2_W_RP2350
+    bool
+    default y
+    select BOARD_FAMILY_PICO2_W

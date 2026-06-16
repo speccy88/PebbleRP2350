@@ -63,6 +63,8 @@ static void prv_fruitjam_record_ctl_state(bool active) {
 
 bool bt_ctl_is_airplane_mode_on(void) { return s_comm_airplane_mode_on; }
 
+bool bt_ctl_is_initialized(void) { return s_comm_initialized; }
+
 bool bt_ctl_is_bluetooth_active(void) {
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
   if (prv_fruitjam_bluetooth_holdoff_active()) {

@@ -18,6 +18,23 @@ typedef struct FlashSecurityRegisters {
   uint16_t sec_reg_size;
 } FlashSecurityRegisters;
 
+typedef struct FlashDebugInfo {
+  bool backend_is_rp2350_xip;
+  uint32_t write_calls;
+  uint32_t write_bytes;
+  uint32_t erase_async_calls;
+  uint32_t erase_blocking_calls;
+  uint32_t erase_subsector_calls;
+  uint32_t erase_sector_calls;
+  uint32_t xip_ops;
+  uint32_t xip_program_ops;
+  uint32_t xip_erase_ops;
+  uint32_t xip_last_block_us;
+  uint32_t xip_max_block_us;
+  uint32_t xip_last_offset;
+  uint32_t xip_last_count;
+} FlashDebugInfo;
+
 /**
  * Configure the micro's peripherals to communicate with the flash
  * chip.
@@ -145,6 +162,8 @@ bool flash_is_whoami_correct(void);
 //! Helper function to extract the Flash Size from the ID (whoami)
 //! @return the size of the flash in bytes
 size_t flash_get_size(void);
+
+void flash_get_debug_info(FlashDebugInfo *info);
 
 // This is only intended to be called when entering stop mode. It does not use
 // any locks because IRQs have already been disabled. The idea is to only incur

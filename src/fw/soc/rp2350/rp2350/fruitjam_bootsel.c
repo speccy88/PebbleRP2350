@@ -31,17 +31,21 @@ static bool prv_reboot_was_unsafe(const RebootReason *reason) {
   return reason->code >= RebootReasonCode_Watchdog && !reason->restarted_safely;
 }
 
-void fruitjam_bootsel_enter(void) {
+void fruitjam_bootsel_enter_with_params(uint32_t param0, uint32_t param1) {
   const uint16_t lookup_addr = prv_read_bootrom_hword(BOOTROM_TABLE_LOOKUP_OFFSET);
   RomTableLookupFn lookup = (RomTableLookupFn)(uintptr_t)lookup_addr;
   RomRebootFn reboot = (RomRebootFn)lookup(ROM_FUNC_REBOOT, RT_FLAG_FUNC_ARM_SEC);
 
   if (reboot) {
     reboot(REBOOT2_FLAG_REBOOT_TYPE_BOOTSEL | REBOOT2_FLAG_NO_RETURN_ON_SUCCESS,
-           10U, 0U, 0U);
+           10U, param0, param1);
   }
 
   system_hard_reset();
+}
+
+void fruitjam_bootsel_enter(void) {
+  fruitjam_bootsel_enter_with_params(0U, 0U);
 }
 
 void fruitjam_bootsel_clear_boot_loop_strikes(void) {

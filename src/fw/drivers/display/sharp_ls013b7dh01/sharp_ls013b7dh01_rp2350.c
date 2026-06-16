@@ -31,15 +31,15 @@ static bool s_initialized;
 static bool s_vcom_state;
 static TaskHandle_t s_vcom_task;
 #if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_BRINGUP_LOOP) || \
-    defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT)
+    defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI_DIAGNOSTIC_PATTERN)
 static uint8_t s_diag_frame[DISPLAY_FRAMEBUFFER_BYTES];
 #endif
 static uint8_t s_wire_row[DISP_LINE_BYTES];
 
 typedef enum {
-  DiagPattern_DriverBitbang,
+  DiagPattern_DriverInit,
   DiagPattern_SchedulerLoop,
-#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT)
+#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI_DIAGNOSTIC_PATTERN)
   DiagPattern_DriverSpi,
 #endif
 } DiagPattern;
@@ -54,7 +54,7 @@ static void prv_vcom_task(void *data) {
   }
 }
 
-#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT)
+#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI_DIAGNOSTIC_PATTERN)
 static void prv_diag_set_pixel(uint16_t x, uint16_t y, bool black) {
   uint8_t *byte = &s_diag_frame[(uint32_t)y * BOOT_FRAMEBUFFER_BYTES_PER_ROW + (x / 8U)];
   const uint8_t mask = (uint8_t)(1U << (x & 7U));
@@ -87,15 +87,14 @@ static void prv_write_pebble_row(uint16_t y, const uint8_t *data) {
   fruitjam_lcd_write_row_msb(wire_y, s_wire_row);
 }
 
-#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT)
+#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI_DIAGNOSTIC_PATTERN)
 static bool prv_spi_diag_pixel(uint16_t x, uint16_t y) {
   const bool vertical_bar = ((x / 10U) & 1U) != 0U;
   const bool diagonal =
       (uint32_t)y * PBL_DISPLAY_WIDTH <= ((uint32_t)x + 1U) * PBL_DISPLAY_HEIGHT &&
       ((uint32_t)y + 1U) * PBL_DISPLAY_WIDTH >= (uint32_t)x * PBL_DISPLAY_HEIGHT;
   const bool opposite_diagonal =
-      (uint32_t)y * PBL_DISPLAY_WIDTH <=
-          ((uint32_t)(PBL_DISPLAY_WIDTH - x)) * PBL_DISPLAY_HEIGHT &&
+      (uint32_t)y * PBL_DISPLAY_WIDTH <= ((uint32_t)(PBL_DISPLAY_WIDTH - x)) * PBL_DISPLAY_HEIGHT &&
       ((uint32_t)y + 1U) * PBL_DISPLAY_WIDTH >=
           ((uint32_t)(PBL_DISPLAY_WIDTH - 1U - x)) * PBL_DISPLAY_HEIGHT;
 
@@ -118,17 +117,16 @@ static void prv_show_spi_pattern(void) {
 #endif
 
 static void prv_show_init_pattern(DiagPattern pattern) {
-#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT)
+#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI_DIAGNOSTIC_PATTERN)
   if (pattern == DiagPattern_DriverSpi) {
     prv_show_spi_pattern();
     return;
   }
 #endif
 
-  const FruitJamBootProgressStage stage =
-      (pattern == DiagPattern_SchedulerLoop) ?
-          FruitJamBootProgressStageDriverReady :
-          FruitJamBootProgressStageDisplayInit;
+  const FruitJamBootProgressStage stage = (pattern == DiagPattern_SchedulerLoop)
+                                              ? FruitJamBootProgressStageDriverReady
+                                              : FruitJamBootProgressStageDisplayInit;
   fruitjam_boot_progress_write_frame(stage);
 }
 
@@ -156,20 +154,20 @@ void display_init(void) {
   fruitjam_lcd_init_pins();
   fruitjam_lcd_set_display_enabled(true);
   fruitjam_lcd_set_vcom(false);
-  display_clear();
-  prv_show_init_pattern(DiagPattern_DriverBitbang);
-
-#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT)
-  fruitjam_lcd_delay(250000U);
-  fruitjam_lcd_use_spi1(true);
+#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_HARDWARE_SPI)
+  fruitjam_lcd_use_hardware_spi(true);
+#else
+  fruitjam_lcd_use_hardware_spi(false);
 #endif
+  display_clear();
+  prv_show_init_pattern(DiagPattern_DriverInit);
 
   if (!s_vcom_task) {
     xTaskCreate(prv_vcom_task, "SharpVCOM", VCOM_TASK_STACK_SIZE, NULL, VCOM_TASK_PRIORITY,
                 &s_vcom_task);
   }
 
-#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI1_EXPERIMENT)
+#if defined(CONFIG_DISPLAY_SHARP_LS013B7DH01_RP2350_SPI_DIAGNOSTIC_PATTERN)
   display_clear();
   prv_show_init_pattern(DiagPattern_DriverSpi);
 #endif

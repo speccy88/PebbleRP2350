@@ -31,6 +31,11 @@ PBL_LOG_MODULE_DEFINE(driver_flash, CONFIG_DRIVER_FLASH_LOG_LEVEL);
 
 static PebbleMutex *s_flash_lock;
 static SemaphoreHandle_t s_erase_semphr;
+static FlashDebugInfo s_flash_debug = {
+#if defined(CONFIG_FLASH_RP2350_XIP)
+  .backend_is_rp2350_xip = true,
+#endif
+};
 
 static struct FlashEraseContext {
   bool in_progress;
@@ -47,6 +52,14 @@ static struct FlashEraseContext {
 static TimerID s_erase_poll_timer;
 static TimerID s_erase_suspend_timer;
 
+static void prv_debug_add_u32(uint32_t *counter, uint32_t value) {
+  const uint32_t old_value = *counter;
+  *counter = (UINT32_MAX - old_value < value) ? UINT32_MAX : old_value + value;
+}
+
+__attribute__((weak)) void flash_impl_get_debug_info(FlashDebugInfo *info) {
+  (void)info;
+}
 
 void flash_init(void) {
   flash_impl_init(false /* coredump_mode */);
@@ -138,6 +151,8 @@ void flash_write_bytes(const uint8_t *buffer, uint32_t start_addr,
   }
 
   PBL_ANALYTICS_ADD(flash_spi_write_bytes, buffer_size);
+  prv_debug_add_u32(&s_flash_debug.write_calls, 1);
+  prv_debug_add_u32(&s_flash_debug.write_bytes, buffer_size);
 
   while (buffer_size) {
     int written = flash_impl_write_page_begin(buffer, start_addr, buffer_size);
@@ -206,6 +221,9 @@ static uint32_t prv_flash_erase_start(uint32_t addr,
         flash_impl_get_typical_subsector_erase_duration_ms() :
         flash_impl_get_typical_sector_erase_duration_ms(),
   };
+  prv_debug_add_u32(is_subsector ? &s_flash_debug.erase_subsector_calls
+                                 : &s_flash_debug.erase_sector_calls,
+                    1);
   stop_mode_disable(InhibitorFlash);  // FIXME: PBL-18028
   status_t status = is_subsector? flash_impl_blank_check_subsector(addr)
                                 : flash_impl_blank_check_sector(addr);
@@ -302,6 +320,7 @@ static void prv_flash_erase_timer_cb(void *context) {
 static void prv_flash_erase_async(
     uint32_t sector_addr, bool is_subsector, FlashOperationCompleteCb on_complete_cb,
     void *context) {
+  prv_debug_add_u32(&s_flash_debug.erase_async_calls, 1);
   uint32_t remaining_ms = prv_flash_erase_start(sector_addr, on_complete_cb,
                                                 context, is_subsector, 0);
   if (remaining_ms) {
@@ -317,6 +336,7 @@ static void prv_blocking_erase_complete(void *context, status_t status) {
 static void prv_flash_erase_blocking(uint32_t sector_addr, bool is_subsector) {
   uint32_t total_time_spent_waiting_ms = 0;
 
+  prv_debug_add_u32(&s_flash_debug.erase_blocking_calls, 1);
   uint32_t remaining_ms = prv_flash_erase_start(
       sector_addr, prv_blocking_erase_complete, NULL, is_subsector, 0);
   while (remaining_ms) {
@@ -460,6 +480,15 @@ void flash_power_down_for_stop_mode(void) {
 
 void flash_power_up_after_stop_mode(void) {
   flash_impl_exit_low_power_mode();
+}
+
+void flash_get_debug_info(FlashDebugInfo *info) {
+  if (!info) {
+    return;
+  }
+
+  *info = s_flash_debug;
+  flash_impl_get_debug_info(info);
 }
 
 bool flash_sector_is_erased(uint32_t sector_addr) {

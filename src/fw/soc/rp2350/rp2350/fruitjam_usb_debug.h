@@ -6,4 +6,5 @@
 #include <stdint.h>
 
 void fruitjam_usb_debug_init(void);
+void fruitjam_usb_debug_polled_main(void);
 void fruitjam_usb_debug_putchar(uint8_t c);

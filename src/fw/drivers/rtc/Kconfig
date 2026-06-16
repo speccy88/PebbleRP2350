@@ -25,6 +25,45 @@ config RTC_RP2350
     help
       Support for the RP2350 timer-backed RTC.
 
+choice RP2350_EXTERNAL_RTC_TYPE
+    prompt "RP2350 external RTC type"
+    depends on RTC_RP2350
+    default RP2350_EXTERNAL_RTC_NONE
+    help
+      Optional battery-backed RTC connected to RP2350 GPIO pins. Board
+      profiles should select a concrete type and pin mapping when fitted.
+
+config RP2350_EXTERNAL_RTC_NONE
+    bool "None"
+
+config RP2350_EXTERNAL_RTC_DS1307
+    bool "DS1307-compatible"
+    help
+      Probe and use a DS1307/DS3231-compatible RTC at the configured I2C
+      address.
+
+endchoice
+
+config RP2350_EXTERNAL_RTC_I2C_ADDRESS
+    int "RP2350 external RTC I2C address"
+    depends on RTC_RP2350 && !RP2350_EXTERNAL_RTC_NONE
+    range 8 119
+    default 104 if RP2350_EXTERNAL_RTC_DS1307
+
+config RP2350_EXTERNAL_RTC_SDA_GPIO
+    int "RP2350 external RTC SDA GPIO"
+    depends on RTC_RP2350 && !RP2350_EXTERNAL_RTC_NONE
+    range 0 47
+    default 20 if BOARD_FRUITJAM_RP2350
+    default 4 if BOARD_PICO2_W_RP2350
+
+config RP2350_EXTERNAL_RTC_SCL_GPIO
+    int "RP2350 external RTC SCL GPIO"
+    depends on RTC_RP2350 && !RP2350_EXTERNAL_RTC_NONE
+    range 0 47
+    default 21 if BOARD_FRUITJAM_RP2350
+    default 5 if BOARD_PICO2_W_RP2350
+
 config RTC_QEMU
     bool "QEMU RTC"
     help

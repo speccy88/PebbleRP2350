@@ -14,6 +14,10 @@
 #include <system/passert.h>
 #include <util/list.h>
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_bt_debug.h"
+#endif
+
 #include "nimble_type_conversions.h"
 
 PBL_LOG_MODULE_DECLARE(bt, CONFIG_BT_LOG_LEVEL);
@@ -61,14 +65,14 @@ static ListNode **prv_find_sec_list_for_obj_type(const int obj_type) {
 }
 
 static BleStoreValueSec *prv_nimble_store_find_sec(const int obj_type,
-                                                const struct ble_store_key_sec *key_sec) {
+                                                   const struct ble_store_key_sec *key_sec) {
   ListNode *sec_list = *prv_find_sec_list_for_obj_type(obj_type);
 
   if (!ble_addr_cmp(&key_sec->peer_addr, BLE_ADDR_ANY)) {
     return (BleStoreValueSec *)list_get_at(sec_list, key_sec->idx);
   } else if (key_sec->idx == 0) {
     return (BleStoreValueSec *)list_find(sec_list, prv_nimble_store_find_sec_cb,
-                                      (void *)&key_sec->peer_addr);
+                                         (void *)&key_sec->peer_addr);
   }
 
   return NULL;
@@ -96,7 +100,7 @@ unlock:
 }
 
 static BleStoreValueSec *prv_nimble_store_upsert_sec(const int obj_type,
-                                                  const struct ble_store_value_sec *value_sec) {
+                                                     const struct ble_store_value_sec *value_sec) {
   BleStoreValueSec *s;
   struct ble_store_key_sec key_sec;
   ble_store_key_from_value_sec(&key_sec, value_sec);
@@ -162,6 +166,7 @@ static void prv_notify_host_bonding_changed(const int obj_type,
   int rc;
   BleBonding bonding;
   BTDeviceAddress addr;
+  bool has_bonding_material;
   struct ble_store_key_sec key_sec;
   struct ble_store_value_sec existing_value_sec;
 
@@ -204,16 +209,39 @@ static void prv_notify_host_bonding_changed(const int obj_type,
 
   nimble_addr_to_pebble_addr(&value_sec->peer_addr, &addr);
 
-  if (bonding.pairing_info.is_remote_encryption_info_valid) {
+  has_bonding_material = bonding.pairing_info.is_remote_encryption_info_valid ||
+                         bonding.pairing_info.is_remote_identity_info_valid;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_store_bonding(has_bonding_material,
+                                         bonding.pairing_info.is_local_encryption_info_valid,
+                                         bonding.pairing_info.is_remote_encryption_info_valid,
+                                         bonding.pairing_info.is_remote_identity_info_valid);
+#endif
+  if (has_bonding_material) {
     bt_driver_cb_handle_create_bonding(&bonding, &addr);
   } else {
     PBL_LOG_DBG("Skipping notifying OS of our keys");
   }
 }
 
+static bool prv_nimble_store_supports_sec_value(const struct ble_store_value_sec *value_sec) {
+  const bool has_ltk = value_sec->ltk_present;
+  const bool has_irk = value_sec->irk_present;
+  const bool has_supported_key = has_ltk || has_irk;
+  const bool ltk_size_ok = !has_ltk || (value_sec->key_size == KEY_SIZE);
+
+  return has_supported_key && ltk_size_ok && !value_sec->csrk_present;
+}
+
 static int prv_nimble_store_write_sec(const int obj_type,
                                       const struct ble_store_value_sec *value_sec) {
-  if (value_sec->key_size != KEY_SIZE || value_sec->csrk_present) {
+  const bool ok = prv_nimble_store_supports_sec_value(value_sec);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_store_sec(obj_type, ok, value_sec->key_size, value_sec->ltk_present,
+                                     value_sec->irk_present, value_sec->sc,
+                                     value_sec->authenticated);
+#endif
+  if (!ok) {
     PBL_LOG_ERR("Unsupported security parameters");
     return BLE_HS_ENOTSUP;
   }
@@ -282,8 +310,8 @@ static bool prv_nimble_store_find_cccd_cb(ListNode *node, void *data) {
 
 static BleStoreValueCCCD *prv_nimble_store_find_cccd(const struct ble_store_key_cccd *key_cccd) {
   BleStoreCCCDFindContext ctx = {
-    .key = key_cccd,
-    .skipped = 0U,
+      .key = key_cccd,
+      .skipped = 0U,
   };
 
   return (BleStoreValueCCCD *)list_find((ListNode *)s_cccds, prv_nimble_store_find_cccd_cb, &ctx);
@@ -521,12 +549,29 @@ static void prv_convert_bonding_local_to_store_val(const BleBonding *bonding,
 
 void bt_driver_handle_host_added_bonding(const BleBonding *bonding) {
   struct ble_store_value_sec value_sec;
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  bool local_ltk_valid = false;
+  bool remote_ltk_valid = false;
+  bool remote_irk_valid = false;
+#endif
 
   prv_convert_bonding_remote_to_store_val(bonding, &value_sec);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  remote_ltk_valid = value_sec.ltk_present;
+  remote_irk_valid = value_sec.irk_present;
+#endif
   prv_nimble_store_upsert_sec(BLE_STORE_OBJ_TYPE_PEER_SEC, &value_sec);
 
   prv_convert_bonding_local_to_store_val(bonding, &value_sec);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  local_ltk_valid = value_sec.ltk_present;
+#endif
   prv_nimble_store_upsert_sec(BLE_STORE_OBJ_TYPE_OUR_SEC, &value_sec);
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_store_bonding(remote_ltk_valid || remote_irk_valid, local_ltk_valid,
+                                         remote_ltk_valid, remote_irk_valid);
+#endif
 }
 
 void bt_driver_handle_host_removed_bonding(const BleBonding *bonding) {
@@ -567,7 +612,7 @@ void bt_driver_handle_host_added_cccd(const BleCCCD *cccd) {
 void bt_driver_handle_host_removed_cccd(const BleCCCD *cccd) {
   BleStoreValueCCCD *s;
   struct ble_store_key_cccd key_cccd;
-  
+
   pebble_device_to_nimble_addr(&cccd->peer, &key_cccd.peer_addr);
   key_cccd.chr_val_handle = cccd->chr_val_handle;
   key_cccd.idx = 0;

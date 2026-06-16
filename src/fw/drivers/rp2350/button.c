@@ -38,16 +38,11 @@
 #define SIO_GPIO_OE_CLR_OFFSET 0x40U
 #define SIO_GPIO_HI_OE_CLR_OFFSET 0x44U
 
-#define POLL_PERIOD_MS 2U
-#define NUM_DEBOUNCE_SAMPLES 20U
 #define BUTTON_TASK_STACK_SIZE 256U
 #define BUTTON_TASK_PRIORITY 2U
-#define BOOTSEL_HOLD_MS 2000U
-#define BOOTSEL_HOLD_SAMPLES (BOOTSEL_HOLD_MS / POLL_PERIOD_MS)
-#define DOWN_COMBO_GRACE_MS 90U
-#define DOWN_COMBO_GRACE_SAMPLES (DOWN_COMBO_GRACE_MS / POLL_PERIOD_MS)
-
-#define DOWN_COMBO_MASK ((1U << BUTTON_ID_UP) | (1U << BUTTON_ID_SELECT))
+#define BOOTSEL_HOLD_SAMPLES (RP2350_BUTTON_BOOTSEL_HOLD_MS / RP2350_BUTTON_POLL_PERIOD_MS)
+#define DOWN_COMBO_GRACE_SAMPLES \
+  (RP2350_BUTTON_DOWN_COMBO_GRACE_MS / RP2350_BUTTON_POLL_PERIOD_MS)
 #define ALL_PHYSICAL_BUTTONS_MASK \
   ((1U << BUTTON_ID_BACK) | (1U << BUTTON_ID_UP) | (1U << BUTTON_ID_SELECT))
 
@@ -106,6 +101,24 @@ static bool prv_physical_button_is_pressed(ButtonId id) {
 
   const bool level = prv_gpio_read(config->pin);
   return config->active_high ? level : !level;
+}
+
+static uint8_t prv_physical_level_bits(void) {
+  uint8_t levels = 0U;
+
+  for (ButtonId id = BUTTON_ID_BACK; id <= BUTTON_ID_SELECT; ++id) {
+    const ButtonConfig *config = &BOARD_CONFIG_BUTTON.buttons[id];
+
+    if (config->pin == GPIO_Pin_NULL || config->port == GPIO_Port_NULL) {
+      continue;
+    }
+
+    if (prv_gpio_read(config->pin)) {
+      levels |= (uint8_t)(1U << id);
+    }
+  }
+
+  return levels;
 }
 
 static uint8_t prv_physical_state_bits(void) {
@@ -174,8 +187,8 @@ static ButtonId prv_apply_rotation_to_button(ButtonId id) {
 static uint8_t prv_unrotated_state_bits(void) {
   uint8_t state = prv_physical_state_bits();
 
-  if ((state & DOWN_COMBO_MASK) == DOWN_COMBO_MASK) {
-    state &= (uint8_t)~DOWN_COMBO_MASK;
+  if ((state & RP2350_BUTTON_DOWN_COMBO_MASK) == RP2350_BUTTON_DOWN_COMBO_MASK) {
+    state &= (uint8_t)~RP2350_BUTTON_DOWN_COMBO_MASK;
     state |= (uint8_t)(1U << BUTTON_ID_DOWN);
   }
 
@@ -221,6 +234,30 @@ static void prv_emit_button_event(ButtonId id, bool is_pressed) {
   };
 
   event_put(&event);
+}
+
+bool button_debug_emit_event(ButtonId id, bool is_pressed) {
+  if (id >= NUM_BUTTONS) {
+    return false;
+  }
+
+  if (is_pressed) {
+    s_debug_snapshot.injected_state |= 1U << id;
+  } else {
+    s_debug_snapshot.injected_state &= ~(1U << id);
+  }
+  prv_emit_button_event(id, is_pressed);
+  return true;
+}
+
+bool button_debug_tap(ButtonId id) {
+  if (id >= NUM_BUTTONS) {
+    return false;
+  }
+
+  button_debug_emit_event(id, true);
+  button_debug_emit_event(id, false);
+  return true;
 }
 
 static void prv_set_emitted_button(ButtonSynthState *state, ButtonId id, bool is_pressed) {
@@ -314,7 +351,9 @@ static void prv_update_individual_navigation_button(ButtonSynthState *state, But
 }
 
 static void prv_update_synthetic_buttons(ButtonSynthState *state) {
-  const bool combo_pressed = (state->debounced_physical_state & DOWN_COMBO_MASK) == DOWN_COMBO_MASK;
+  const bool combo_pressed =
+      (state->debounced_physical_state & RP2350_BUTTON_DOWN_COMBO_MASK) ==
+      RP2350_BUTTON_DOWN_COMBO_MASK;
 
   prv_set_emitted_button(
       state, BUTTON_ID_BACK,
@@ -330,7 +369,8 @@ static void prv_update_synthetic_buttons(ButtonSynthState *state) {
 
   if (prv_is_emitted(state, BUTTON_ID_DOWN)) {
     prv_set_emitted_button(state, BUTTON_ID_DOWN, false);
-    state->suppress_until_release_mask |= state->debounced_physical_state & DOWN_COMBO_MASK;
+    state->suppress_until_release_mask |=
+        state->debounced_physical_state & RP2350_BUTTON_DOWN_COMBO_MASK;
   }
 
   prv_update_individual_navigation_button(state, BUTTON_ID_UP);
@@ -340,11 +380,12 @@ static void prv_update_synthetic_buttons(ButtonSynthState *state) {
 static void prv_suppress_all_button_events(ButtonSynthState *state) {
   prv_set_emitted_button(state, BUTTON_ID_BACK, false);
   prv_release_navigation_buttons(state);
-  state->suppress_until_release_mask = state->debounced_physical_state & DOWN_COMBO_MASK;
+  state->suppress_until_release_mask = state->debounced_physical_state & RP2350_BUTTON_DOWN_COMBO_MASK;
 }
 
-static void prv_update_debug_snapshot(const ButtonSynthState *state, uint8_t raw_state,
-                                      uint32_t bootsel_hold_samples) {
+static void prv_update_debug_snapshot(const ButtonSynthState *state, uint8_t pin_level_state,
+                                      uint8_t raw_state, uint32_t bootsel_hold_samples) {
+  s_debug_snapshot.pin_level_state = pin_level_state;
   s_debug_snapshot.raw_physical_state = raw_state;
   s_debug_snapshot.debounced_physical_state = state->debounced_physical_state;
   s_debug_snapshot.emitted_state = state->emitted_state;
@@ -353,7 +394,8 @@ static void prv_update_debug_snapshot(const ButtonSynthState *state, uint8_t raw
   s_debug_snapshot.pending_samples = state->pending_samples;
   s_debug_snapshot.bootsel_hold_samples = bootsel_hold_samples;
   s_debug_snapshot.down_combo_active =
-      (state->debounced_physical_state & DOWN_COMBO_MASK) == DOWN_COMBO_MASK;
+      (state->debounced_physical_state & RP2350_BUTTON_DOWN_COMBO_MASK) ==
+      RP2350_BUTTON_DOWN_COMBO_MASK;
   s_debug_snapshot.rotated_180 = s_rotated_180;
 }
 
@@ -364,27 +406,30 @@ static void prv_button_task(void *data) {
       .debounced_physical_state = prv_physical_state_bits(),
       .pending_button = NUM_BUTTONS,
   };
+  uint8_t pin_level_state = prv_physical_level_bits();
   uint8_t raw_state = prv_physical_state_bits();
   uint32_t counters[NUM_BUTTONS] = {0};
   uint32_t bootsel_hold_samples = 0;
 
-  prv_update_debug_snapshot(&synth_state, raw_state, bootsel_hold_samples);
+  prv_update_debug_snapshot(&synth_state, pin_level_state, raw_state, bootsel_hold_samples);
 
   while (true) {
     if (prv_all_physical_buttons_pressed()) {
       bootsel_hold_samples++;
       prv_reset_debounce_counters(counters);
       prv_suppress_all_button_events(&synth_state);
+      pin_level_state = prv_physical_level_bits();
       raw_state = prv_physical_state_bits();
-      prv_update_debug_snapshot(&synth_state, raw_state, bootsel_hold_samples);
+      prv_update_debug_snapshot(&synth_state, pin_level_state, raw_state, bootsel_hold_samples);
       if (bootsel_hold_samples >= BOOTSEL_HOLD_SAMPLES) {
         fruitjam_bootsel_enter();
       }
-      vTaskDelay(pdMS_TO_TICKS(POLL_PERIOD_MS));
+      vTaskDelay(pdMS_TO_TICKS(RP2350_BUTTON_POLL_PERIOD_MS));
       continue;
     }
 
     bootsel_hold_samples = 0U;
+    pin_level_state = prv_physical_level_bits();
     raw_state = prv_physical_state_bits();
 
     for (ButtonId id = BUTTON_ID_BACK; id < NUM_BUTTONS; ++id) {
@@ -400,7 +445,7 @@ static void prv_button_task(void *data) {
         counters[id] = 0;
       } else {
         counters[id]++;
-        if (counters[id] >= NUM_DEBOUNCE_SAMPLES) {
+        if (counters[id] >= RP2350_BUTTON_DEBOUNCE_SAMPLES) {
           counters[id] = 0;
           if (raw_pressed) {
             synth_state.debounced_physical_state |= (1U << id);
@@ -412,9 +457,9 @@ static void prv_button_task(void *data) {
     }
 
     prv_update_synthetic_buttons(&synth_state);
-    prv_update_debug_snapshot(&synth_state, raw_state, bootsel_hold_samples);
+    prv_update_debug_snapshot(&synth_state, pin_level_state, raw_state, bootsel_hold_samples);
 
-    vTaskDelay(pdMS_TO_TICKS(POLL_PERIOD_MS));
+    vTaskDelay(pdMS_TO_TICKS(RP2350_BUTTON_POLL_PERIOD_MS));
   }
 }
 

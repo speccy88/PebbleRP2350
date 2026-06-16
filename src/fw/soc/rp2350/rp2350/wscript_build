@@ -12,17 +12,28 @@ def root_node(path):
     return bld.root.find_node(os.path.normpath(path).lstrip(os.sep))
 
 
-bld.objects(
-    name='soc',
-    source=[
-        'fruitjam_bootsel.c',
-        'fruitjam_boot_progress.c',
-        'fruitjam_esp.c',
-        'fruitjam_lcd.c',
-        'fruitjam_usb_debug.c',
-        'fruitjam_usb_descriptors.c',
-        'init.c',
-        'picobin.S',
+sources = [
+    'fruitjam_bootsel.c',
+    'fruitjam_boot_progress.c',
+    'fruitjam_lcd.c',
+    'rp2350_external_rtc.c',
+    'fruitjam_usb_debug.c',
+    'fruitjam_usb_descriptors.c',
+    'init.c',
+    'picobin.S',
+]
+
+if bld.env.CONFIG_BOARD_FRUITJAM_RP2350:
+    sources.append('fruitjam_esp.c')
+    sources.append('rp2350_bluetooth_hci_fruitjam.c')
+else:
+    sources.append('fruitjam_esp_stub.c')
+    sources.append('rp2350_bluetooth_hci_cyw43_stub.c')
+
+if bld.env.CONFIG_BT_FW_STUB:
+    sources.append('fruitjam_bt_debug_stub.c')
+
+sources.extend([
         root_node(os.path.join(tinyusb, 'src/class/cdc/cdc_device.c')),
         root_node(os.path.join(tinyusb, 'src/common/tusb_fifo.c')),
         root_node(os.path.join(tinyusb, 'src/device/usbd.c')),
@@ -30,7 +41,11 @@ bld.objects(
         root_node(os.path.join(tinyusb, 'src/portable/raspberrypi/rp2040/dcd_rp2040.c')),
         root_node(os.path.join(tinyusb, 'src/portable/raspberrypi/rp2040/rp2040_usb.c')),
         root_node(os.path.join(tinyusb, 'src/tusb.c')),
-    ],
+])
+
+bld.objects(
+    name='soc',
+    source=sources,
     includes=[
         '.',
         os.path.join(tinyusb, 'src'),

@@ -132,15 +132,20 @@ def main() -> None:
         type=lambda value: int(value, 0),
         default=FRUITJAM_SYSTEM_RESOURCES_BANK0,
     )
+    parser.add_argument(
+        "--resources-bank-size",
+        type=lambda value: int(value, 0),
+        default=FRUITJAM_SYSTEM_RESOURCES_BANK_SIZE,
+    )
     args = parser.parse_args()
 
     firmware_uf2 = args.firmware_uf2.read_bytes()
     resources = args.resources.read_bytes()
 
-    if len(resources) > FRUITJAM_SYSTEM_RESOURCES_BANK_SIZE:
+    if len(resources) > args.resources_bank_size:
         raise Uf2Error(
-            "system_resources.pbpack is larger than the Fruit Jam resource bank "
-            f"({len(resources)} > {FRUITJAM_SYSTEM_RESOURCES_BANK_SIZE})"
+            "system_resources.pbpack is larger than the selected resource bank "
+            f"({len(resources)} > {args.resources_bank_size})"
         )
 
     family_id = _main_family_id(firmware_uf2)

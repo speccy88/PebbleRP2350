@@ -16,3 +16,6 @@
 //! BTErrnoInvalidState if service discovery was already on-going, or
 //! an internal error otherwise (>= BTErrnoInternalErrorBegin).
 BTErrno gatt_client_discovery_discover_all(const BTDeviceInternal *device);
+
+//! Restarts discovery of all GATT services, characteristics and descriptors.
+BTErrno gatt_client_discovery_rediscover_all(const BTDeviceInternal *device);

@@ -192,6 +192,10 @@ SECTIONS {
         KEEP(*(.note.gnu.build-id))
     } >FLASH
 
+    .embedded_end_block : {
+        KEEP(*(.embedded_end_block))
+    } >FLASH
+
     /* Struct with version information of the firmware. This must be the last thing that goes
      * into FLASH that has a non-zero size. */
     .fw_version : {

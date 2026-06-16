@@ -10,6 +10,7 @@
 #include <comm/bt_lock.h>
 #include <host/ble_gap.h>
 #include <host/ble_hs_hci.h>
+#include <host/ble_store.h>
 #include <system/logging.h>
 #include <system/passert.h>
 #include <util/math.h>
@@ -22,9 +23,42 @@
 
 PBL_LOG_MODULE_DECLARE(bt, CONFIG_BT_LOG_LEVEL);
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+#define RP2350_REQUEST_SECURITY_ON_RECONNECT 1
+#endif
+
 static const ble_uuid16_t s_device_name_chr_uuid = BLE_UUID16_INIT(0x2A00);
 static char s_device_name[BT_DEVICE_NAME_BUFFER_SIZE];
 static bool s_pairing_in_progress;
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+static bool prv_error_needs_recovery(int rc) {
+  return rc == BLE_HS_ETIMEOUT_HCI || rc == BLE_HS_ENOADDR || rc == BLE_HS_ENOTSYNCED ||
+         rc == BLE_HS_EDISABLED;
+}
+#endif
+
+#if defined(RP2350_REQUEST_SECURITY_ON_RECONNECT)
+static bool prv_is_peer_bonded(const struct ble_gap_conn_desc *desc) {
+  struct ble_store_key_sec key_sec = {
+      .peer_addr = desc->peer_id_addr,
+  };
+  struct ble_store_value_sec value_sec;
+  return ble_store_read_peer_sec(&key_sec, &value_sec) == 0;
+}
+
+static void prv_request_security_for_bonded_peer(uint16_t conn_handle,
+                                                 const struct ble_gap_conn_desc *desc) {
+  if (!prv_is_peer_bonded(desc) || desc->sec_state.encrypted) {
+    return;
+  }
+
+  const int rc = ble_gap_security_initiate(conn_handle);
+  if (rc != 0 && rc != BLE_HS_EALREADY) {
+    PBL_LOG_WRN("Failed to request BLE security on reconnect (0x%04x)", (uint16_t)rc);
+  }
+}
+#endif
 
 static int prv_device_name_read_event_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                                          struct ble_gatt_attr *attr, void *arg) {
@@ -48,10 +82,14 @@ void bt_driver_advert_advertising_disable(void) {
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
   fruitjam_bt_debug_record_adv_stop();
 #endif
-  PBL_ASSERT(rc == 0, "Failed to stop advertising (0x%04x)", (uint16_t)rc);
+  if (rc != 0) {
+    PBL_LOG_WRN("Failed to stop advertising (0x%04x)", (uint16_t)rc);
+  }
 }
 
-bool bt_driver_advert_client_get_tx_power(int8_t *tx_power) { return false; }
+bool bt_driver_advert_client_get_tx_power(int8_t *tx_power) {
+  return false;
+}
 
 bool bt_driver_advert_set_advertising_data(const BLEAdData *ad_data) {
   int rc;
@@ -88,6 +126,15 @@ static void prv_handle_connection_event(struct ble_gap_event *event) {
     PBL_LOG_ERR("prv_handle_connection_event: Failed to find connection descriptor");
     return;
   }
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  const bool is_bonded = prv_is_peer_bonded(&desc);
+  fruitjam_bt_debug_record_connection(
+      event->connect.conn_handle, ble_att_mtu(event->connect.conn_handle),
+      desc.role == BLE_GAP_ROLE_MASTER, desc.sec_state.encrypted, is_bonded);
+#endif
+#if defined(RP2350_REQUEST_SECURITY_ON_RECONNECT)
+  prv_request_security_for_bonded_peer(event->connect.conn_handle, &desc);
+#endif
 
   struct BleConnectionCompleteEvent complete_event = {
       .handle = event->connect.conn_handle,
@@ -154,6 +201,16 @@ static void prv_handle_enc_change_event(struct ble_gap_event *event) {
     PBL_LOG_ERR("prv_handle_enc_change_event: Failed to find connection descriptor");
     return;
   }
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  struct ble_store_key_sec key_sec = {
+      .peer_addr = desc.peer_id_addr,
+  };
+  struct ble_store_value_sec value_sec;
+  const bool is_bonded = ble_store_read_peer_sec(&key_sec, &value_sec) == 0;
+  fruitjam_bt_debug_record_connection(
+      event->enc_change.conn_handle, ble_att_mtu(event->enc_change.conn_handle),
+      desc.role == BLE_GAP_ROLE_MASTER, desc.sec_state.encrypted, is_bonded);
+#endif
 
   struct BleEncryptionChange enc_change_event = {
       .encryption_enabled = desc.sec_state.encrypted,
@@ -166,8 +223,7 @@ static void prv_handle_enc_change_event(struct ble_gap_event *event) {
 
 static void prv_handle_conn_params_updated_event(struct ble_gap_event *event) {
   if (event->conn_update.status != 0) {
-    PBL_LOG_ERR("Connection parameters update failed: 0x%04x",
-              (uint16_t)event->conn_update.status);
+    PBL_LOG_ERR("Connection parameters update failed: 0x%04x", (uint16_t)event->conn_update.status);
     return;
   }
 
@@ -177,10 +233,11 @@ static void prv_handle_conn_params_updated_event(struct ble_gap_event *event) {
     return;
   }
 
-  PBL_LOG_INFO("Connection parameters updated: "
-            "itvl=%u ms, latency=%u, spvn timeout=%u ms",
-            desc.conn_itvl * BLE_HCI_CONN_ITVL / 1000, desc.conn_latency,
-            desc.supervision_timeout * BLE_HCI_CONN_SPVN_TMO_UNITS);
+  PBL_LOG_INFO(
+      "Connection parameters updated: "
+      "itvl=%u ms, latency=%u, spvn timeout=%u ms",
+      desc.conn_itvl * BLE_HCI_CONN_ITVL / 1000, desc.conn_latency,
+      desc.supervision_timeout * BLE_HCI_CONN_SPVN_TMO_UNITS);
 
   struct BleConnectionUpdateCompleteEvent conn_params_update_event = {
       .status = HciStatusCode_Success,
@@ -194,12 +251,13 @@ static void prv_handle_conn_params_updated_event(struct ble_gap_event *event) {
 static void prv_handle_conn_update_req_event(struct ble_gap_event *event) {
   *event->conn_update_req.self_params = *event->conn_update_req.peer_params;
 
-  PBL_LOG_INFO("Connection update request: "
-            "itvl=(%u, %u) ms, latency=%u, spvn timeout=%u ms",
-            event->conn_update_req.self_params->itvl_min * BLE_HCI_CONN_ITVL / 1000,
-            event->conn_update_req.self_params->itvl_max * BLE_HCI_CONN_ITVL / 1000,
-            event->conn_update_req.self_params->latency,
-            event->conn_update_req.self_params->supervision_timeout * BLE_HCI_CONN_SPVN_TMO_UNITS);
+  PBL_LOG_INFO(
+      "Connection update request: "
+      "itvl=(%u, %u) ms, latency=%u, spvn timeout=%u ms",
+      event->conn_update_req.self_params->itvl_min * BLE_HCI_CONN_ITVL / 1000,
+      event->conn_update_req.self_params->itvl_max * BLE_HCI_CONN_ITVL / 1000,
+      event->conn_update_req.self_params->latency,
+      event->conn_update_req.self_params->supervision_timeout * BLE_HCI_CONN_SPVN_TMO_UNITS);
 }
 
 static void prv_handle_passkey_event(struct ble_gap_event *event) {
@@ -254,6 +312,16 @@ static void prv_handle_mtu_change_event(struct ble_gap_event *event) {
   }
 
   GattDeviceMtuUpdateEvent mtu_update_event = {.mtu = event->mtu.value};
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  struct ble_store_key_sec key_sec = {
+      .peer_addr = desc.peer_id_addr,
+  };
+  struct ble_store_value_sec value_sec;
+  const bool is_bonded = ble_store_read_peer_sec(&key_sec, &value_sec) == 0;
+  fruitjam_bt_debug_record_connection(event->mtu.conn_handle, event->mtu.value,
+                                      desc.role == BLE_GAP_ROLE_MASTER, desc.sec_state.encrypted,
+                                      is_bonded);
+#endif
   nimble_addr_to_pebble_addr(&desc.peer_id_addr, &mtu_update_event.dev_address);
   bt_driver_cb_gatt_handle_mtu_update(&mtu_update_event);
 }
@@ -262,9 +330,13 @@ extern int pebble_pairing_service_get_connectivity_send_notification(uint16_t co
                                                                      uint16_t attr_handle);
 static void prv_handle_subscription_event(struct ble_gap_event *event) {
   PBL_LOG_DBG("prv_handle_subscription_event: connhandle: %d attr:%d notify:%d/%d indicate:%d/%d",
-            event->subscribe.conn_handle, event->subscribe.attr_handle,
-            event->subscribe.prev_notify, event->subscribe.cur_notify,
-            event->subscribe.prev_indicate, event->subscribe.cur_indicate);
+              event->subscribe.conn_handle, event->subscribe.attr_handle,
+              event->subscribe.prev_notify, event->subscribe.cur_notify,
+              event->subscribe.prev_indicate, event->subscribe.cur_indicate);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_gap_subscribe(event->subscribe.attr_handle, event->subscribe.cur_notify,
+                                         event->subscribe.cur_indicate);
+#endif
 }
 
 static void prv_handle_notification_rx_event(struct ble_gap_event *event) {
@@ -290,9 +362,7 @@ static void prv_handle_notification_rx_event(struct ble_gap_event *event) {
 
 static void prv_handle_notification_tx_event(struct ble_gap_event *event) {
   PBL_LOG_DBG("notification tx event; status=%d attr_handle=%d indication=%d\n",
-            event->notify_tx.status,
-            event->notify_tx.attr_handle,
-            event->notify_tx.indication);
+              event->notify_tx.status, event->notify_tx.attr_handle, event->notify_tx.indication);
 }
 
 static int prv_handle_repeat_pairing_event(struct ble_gap_event *event) {
@@ -320,13 +390,12 @@ static int prv_handle_repeat_pairing_event(struct ble_gap_event *event) {
 
 static void prv_handle_phy_update_event(struct ble_gap_event *event) {
   if (event->phy_updated.status != 0) {
-    PBL_LOG_ERR("PHY update failed: 0x%04x",
-              (uint16_t)event->phy_updated.status);
+    PBL_LOG_ERR("PHY update failed: 0x%04x", (uint16_t)event->phy_updated.status);
     return;
   }
 
   PBL_LOG_DBG("PHY update complete; conn_handle=%d, tx_phy=%d, rx_phy=%d",
-          event->phy_updated.conn_handle, event->phy_updated.tx_phy, event->phy_updated.rx_phy);
+              event->phy_updated.conn_handle, event->phy_updated.tx_phy, event->phy_updated.rx_phy);
 }
 
 static int prv_handle_gap_event(struct ble_gap_event *event, void *arg) {
@@ -364,8 +433,7 @@ static int prv_handle_gap_event(struct ble_gap_event *event, void *arg) {
       prv_handle_connection_event(event);
       break;
     case BLE_GAP_EVENT_DISCONNECT:
-      PBL_LOG_INFO("BLE_GAP_EVENT_DISCONNECT reason=0x%x",
-              event->disconnect.reason);
+      PBL_LOG_INFO("BLE_GAP_EVENT_DISCONNECT reason=0x%x", event->disconnect.reason);
       prv_handle_disconnection_event(event);
       break;
     case BLE_GAP_EVENT_ENC_CHANGE:
@@ -437,6 +505,9 @@ bool bt_driver_advert_advertising_enable(uint32_t min_interval_ms, uint32_t max_
   if (addr_rc != 0) {
 #if defined(CONFIG_BOARD_FRUITJAM_RP2350)
     fruitjam_bt_debug_record_adv_start(min_interval_ms, max_interval_ms, addr_rc, 0xffU, 0);
+    if (prv_error_needs_recovery(addr_rc)) {
+      fruitjam_bt_debug_schedule_recovery(FruitJamBtDebugRecoveryReasonAdvAddress, addr_rc);
+    }
 #endif
     PBL_LOG_ERR("Failed to infer own address type (%d)", addr_rc);
     return false;
@@ -447,6 +518,11 @@ bool bt_driver_advert_advertising_enable(uint32_t min_interval_ms, uint32_t max_
   fruitjam_bt_debug_record_adv_start(min_interval_ms, max_interval_ms, addr_rc, own_addr_type, rc);
 #endif
   if (rc != 0) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    if (prv_error_needs_recovery(rc)) {
+      fruitjam_bt_debug_schedule_recovery(FruitJamBtDebugRecoveryReasonAdvStart, rc);
+    }
+#endif
     PBL_LOG_ERR("Failed to start advertising (0x%04x)", (uint16_t)rc);
     return false;
   }

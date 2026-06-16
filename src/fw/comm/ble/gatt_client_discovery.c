@@ -20,6 +20,10 @@
 #include <bluetooth/gatt_discovery.h>
 #include <btutil/bt_device.h>
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_bt_debug.h"
+#endif
+
 #include <inttypes.h>
 
 // TODO: virtualize the gatt_client_discovery_discover_all() call
@@ -37,6 +41,7 @@ extern BLEService gatt_client_att_handle_get_service(
 // Static function prototypes
 
 static BTErrno prv_run_next_job(GAPLEConnection *connection);
+static BTErrno prv_discover_all_locked(GAPLEConnection *connection);
 
 // -------------------------------------------------------------------------------------------------
 // Wrappers around Bluetopia's API
@@ -345,6 +350,11 @@ void gatt_client_cleanup_discovery_jobs(GAPLEConnection *connection) {
 }
 
 static void prv_finalize_discovery(GAPLEConnection *connection, BTErrno errno) {
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  const uint32_t service_count = connection->gatt_remote_services ?
+      list_count(&connection->gatt_remote_services->node) : 0U;
+  fruitjam_bt_debug_record_discovery_complete(errno, service_count);
+#endif
   if (errno != BTErrnoOK) {
     // Handle failure -- cleanup and dispatch event:
     prv_free_service_nodes(connection);
@@ -435,24 +445,29 @@ BTErrno gatt_client_discovery_discover_all(const BTDeviceInternal *device) {
       ret_val = BTErrnoInvalidParameter;
       goto unlock;
     }
-    if (connection->gatt_is_service_discovery_in_progress) {
-      ret_val = BTErrnoInvalidState;
-      goto unlock;
-    }
-    if (connection->gatt_remote_services) {
-      // Already discovered, no need to do it again!
-      prv_send_services_added_event(connection, BTErrnoOK);
-      goto unlock;
-    }
-    conn_mgr_set_ble_conn_response_time(connection, BtConsumerLeServiceDiscovery,
-                                        ResponseTimeMin, 30);
-    prv_add_discovery_job(connection, NULL);
-    // if we get here there is no discovery in progress so dispatch the job
-    ret_val = prv_run_next_job(connection);
+    ret_val = prv_discover_all_locked(connection);
   }
 unlock:
   bt_unlock();
   return ret_val;
+}
+
+static BTErrno prv_discover_all_locked(GAPLEConnection *connection) {
+  bt_lock_assert_held(true);
+
+  if (connection->gatt_is_service_discovery_in_progress) {
+    return BTErrnoInvalidState;
+  }
+
+  if (connection->gatt_remote_services) {
+    // Already discovered, no need to do it again!
+    prv_send_services_added_event(connection, BTErrnoOK);
+    return BTErrnoOK;
+  }
+
+  conn_mgr_set_ble_conn_response_time(connection, BtConsumerLeServiceDiscovery, ResponseTimeMin, 30);
+  prv_add_discovery_job(connection, NULL);
+  return prv_run_next_job(connection);
 }
 
 //! extern for gap_le_connnection.c
@@ -494,7 +509,7 @@ BTErrno gatt_client_discovery_rediscover_all(const BTDeviceInternal *device) {
         gatt_client_subscriptions_cleanup_by_connection(connection, true /* should_unsubscribe */);
       }
       prv_finalize_discovery(connection, BTErrnoServiceDiscoveryDatabaseChanged);
-      ret_val = gatt_client_discovery_discover_all(device);
+      ret_val = prv_discover_all_locked(connection);
     }
   }
   bt_unlock();

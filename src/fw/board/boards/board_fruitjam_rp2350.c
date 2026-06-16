@@ -3,6 +3,7 @@
 
 #include "board/board.h"
 #include "drivers/uart/rp2350.h"
+#include "soc/rp2350/rp2350/fruitjam_lcd.h"
 
 #define UART0_BASE 0x40070000U
 #define GPIO_FUNC_UART 2U
@@ -26,18 +27,7 @@ UARTDevice *const DBG_UART = (UARTDevice *)&s_dbg_uart;
 
 IRQ_MAP(UART0_IRQ, uart_irq_handler, DBG_UART);
 
-typedef struct FruitJamDisplayDevice {
-  uint8_t spi_index;
-  uint8_t sck_gpio;
-  uint8_t mosi_gpio;
-  uint8_t miso_gpio;
-  uint8_t lcd_cs_gpio;
-  uint8_t ram_cs_gpio;
-  uint8_t disp_gpio;
-  uint8_t extcomin_gpio;
-} FruitJamDisplayDevice;
-
-static const FruitJamDisplayDevice s_display = {
+static const Rp2350MemoryLcdConfig s_display = {
     .spi_index = 1,
     .sck_gpio = FRUITJAM_PIN_LCD_SCK,
     .mosi_gpio = FRUITJAM_PIN_LCD_MOSI,
@@ -46,9 +36,23 @@ static const FruitJamDisplayDevice s_display = {
     .ram_cs_gpio = FRUITJAM_PIN_LCD_RAM_CS,
     .disp_gpio = FRUITJAM_PIN_LCD_DISP,
     .extcomin_gpio = FRUITJAM_PIN_LCD_EXTCOMIN,
+    .inactive_cs_gpio = FRUITJAM_PIN_ESP_CS,
 };
 
 DisplayDevice *const DISPLAY = (DisplayDevice *)&s_display;
+
+#if defined(CONFIG_RP2350_EXTERNAL_RTC_DS1307)
+static const Rp2350ExternalRtcConfig s_external_rtc = {
+    .type = Rp2350ExternalRtcTypeDs1307,
+    .i2c_address = CONFIG_RP2350_EXTERNAL_RTC_I2C_ADDRESS,
+    .sda_gpio = CONFIG_RP2350_EXTERNAL_RTC_SDA_GPIO,
+    .scl_gpio = CONFIG_RP2350_EXTERNAL_RTC_SCL_GPIO,
+};
+
+const Rp2350ExternalRtcConfig *const BOARD_CONFIG_EXTERNAL_RTC = &s_external_rtc;
+#else
+const Rp2350ExternalRtcConfig *const BOARD_CONFIG_EXTERNAL_RTC = NULL;
+#endif
 
 const BoardConfigActuator BOARD_CONFIG_VIBE = {
     .options = 0,

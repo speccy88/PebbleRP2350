@@ -96,6 +96,10 @@ _Static_assert(sizeof(struct FirmwareMetadata) == (sizeof(uint32_t) +
 
 #ifdef CONFIG_BOARD_ASTERIX
   #define FIRMWARE_METADATA_HW_PLATFORM (FirmwareMetadataPlatformPebbleAsterix)
+#elif defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  #define FIRMWARE_METADATA_HW_PLATFORM (FirmwareMetadataPlatformPebbleAsterix)
+#elif defined(CONFIG_BOARD_PICO2_W_RP2350)
+  #define FIRMWARE_METADATA_HW_PLATFORM (FirmwareMetadataPlatformPebbleAsterix)
 #elif defined(CONFIG_BOARD_OBELIX_DVT)
   #define FIRMWARE_METADATA_HW_PLATFORM (FirmwareMetadataPlatformPebbleObelixDVT)
 #elif defined(CONFIG_BOARD_OBELIX_PVT)

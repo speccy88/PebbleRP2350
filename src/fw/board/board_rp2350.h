@@ -4,6 +4,7 @@
 #pragma once
 
 #include "display.h"
+#include "soc/rp2350/rp2350/rp2350_external_rtc.h"
 
 #include <cmsis_core.h>
 #include <stdbool.h>
@@ -175,6 +176,8 @@ typedef const struct HRMDevice HRMDevice;
 typedef const struct MicDevice MicDevice;
 typedef const struct DisplayDevice DisplayDevice;
 typedef const struct AudioDevice AudioDevice;
+
+extern const Rp2350ExternalRtcConfig *const BOARD_CONFIG_EXTERNAL_RTC;
 
 void board_early_init(void);
 void board_init(void);

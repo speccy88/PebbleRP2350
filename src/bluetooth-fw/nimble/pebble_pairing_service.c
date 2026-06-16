@@ -11,9 +11,17 @@
 #include <system/logging.h>
 #include <system/passert.h>
 
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+#include "soc/rp2350/rp2350/fruitjam_bt_debug.h"
+#endif
+
 #include "nimble_type_conversions.h"
 
 PBL_LOG_MODULE_DECLARE(bt, CONFIG_BT_LOG_LEVEL);
+
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+#define RP2350_REQUIRES_SLAVE_SECURITY_REQUEST 1
+#endif
 
 #define TRIGGER_PAIRING_NO_SEC_REQ    (1U << 1U)
 #define TRIGGER_PAIRING_FORCE_SEC_REQ (1U << 2U)
@@ -37,13 +45,26 @@ static int pebble_pairing_service_get_connectivity_status(
 
   int bond_count = 0;
   ble_store_util_count(BLE_STORE_OBJ_TYPE_PEER_SEC, &bond_count);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  if (!is_bonded && desc.sec_state.encrypted && bond_count > 0) {
+    is_bonded = true;
+  }
+#endif
 
   memset(status, 0, sizeof(*status));
   status->ble_is_connected = true;
   status->ble_is_bonded = is_bonded;
   status->ble_is_encrypted = desc.sec_state.encrypted;
   status->has_bonded_gateway = (bond_count > 0);
+#if defined(RP2350_REQUIRES_SLAVE_SECURITY_REQUEST)
+  status->supports_pinning_without_security_request = false;
+#else
   status->supports_pinning_without_security_request = true;
+#endif
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_pps_status(status->ble_is_connected, status->ble_is_bonded,
+                                      status->ble_is_encrypted, status->has_bonded_gateway);
+#endif
 
   return 0;
 }
@@ -59,6 +80,9 @@ int pebble_pairing_service_get_connectivity_send_notification(uint16_t conn_hand
 
   struct os_mbuf *om = ble_hs_mbuf_from_flat(&status, sizeof(status));
   rc = ble_gatts_notify_custom(conn_handle, attr_handle, om);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_pps_notify(rc);
+#endif
   if (rc != 0) {
     PBL_LOG_ERR("ble_gatts_notify_custom failed for attr %d: 0x%04x", attr_handle, (uint16_t)rc);
     return rc;
@@ -73,6 +97,9 @@ static int prv_access_connection_status(uint16_t conn_handle, uint16_t attr_hand
 
   PebblePairingServiceConnectivityStatus status;
   int rc = pebble_pairing_service_get_connectivity_status(conn_handle, &status);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+  fruitjam_bt_debug_record_pps_access(0, rc, 0);
+#endif
   if (rc != 0) {
     PBL_LOG_ERR("prv_access_connection_status failed: %d", rc);
     return 0;
@@ -94,6 +121,9 @@ static int prv_access_trigger_pairing(uint16_t conn_handle, uint16_t attr_handle
 
   if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR && !desc.sec_state.encrypted) {
     rc = ble_gap_security_initiate(conn_handle);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_pps_access(1, rc, 0);
+#endif
     if (rc != 0) {
       return rc;
     }
@@ -101,6 +131,9 @@ static int prv_access_trigger_pairing(uint16_t conn_handle, uint16_t attr_handle
     uint8_t flags;
 
     rc = ble_hs_mbuf_to_flat(ctxt->om, &flags, sizeof(flags), NULL);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+    fruitjam_bt_debug_record_pps_access(2, rc, flags);
+#endif
     if (rc != 0) {
       return rc;
     }
@@ -110,6 +143,9 @@ static int prv_access_trigger_pairing(uint16_t conn_handle, uint16_t attr_handle
     if ((((flags & TRIGGER_PAIRING_NO_SEC_REQ) == 0U) && !desc.sec_state.encrypted) ||
         ((flags & TRIGGER_PAIRING_FORCE_SEC_REQ) != 0U)) {
       rc = ble_gap_security_initiate(conn_handle);
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350)
+      fruitjam_bt_debug_record_pps_access(2, rc, flags);
+#endif
       if (rc != 0) {
         return rc;
       }

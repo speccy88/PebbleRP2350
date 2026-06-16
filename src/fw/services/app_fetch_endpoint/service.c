@@ -25,10 +25,12 @@ PBL_LOG_MODULE_DEFINE(service_app_fetch_endpoint, CONFIG_SERVICE_APP_FETCH_ENDPO
 //! Used for keeping track of binaries that are loaded through put_bytes
 typedef struct {
   AppInstallId app_id;
+  Uuid request_uuid;
   uint32_t total_size;
   AppFetchResult prev_error;
   bool cancelling;
   bool in_progress;
+  bool phone_started;
   bool app;
   bool worker;
   bool resources;
@@ -61,10 +63,15 @@ typedef struct PACKED {
 
 //! Timeout used to determine how long we should wait before the phone starts sending the app
 //! we requested (by issuing a put_bytes request).
+#if defined(CONFIG_BOARD_FRUITJAM_RP2350) || defined(CONFIG_BOARD_PICO2_W_RP2350)
+#define FETCH_TIMEOUT_MS 45000
+#else
 #define FETCH_TIMEOUT_MS 15000
+#endif
 
 //! State for the app fetch flow
 static AppFetchState s_fetch_state;
+static AppFetchDebugInfo s_fetch_debug;
 
 //! Endpoint ID
 static const uint16_t APP_FETCH_ENDPOINT_ID = 6001;
@@ -136,6 +143,9 @@ static uint8_t prv_compute_progress_percent(PutBytesObjectType type, unsigned in
 
 //! Cleans up the state of the app fetch endpoint. Always called from the system task
 static void prv_cleanup(AppFetchResult result) {
+  s_fetch_debug.cleanup_count++;
+  s_fetch_debug.last_cleanup_result = result;
+
   if (result != AppFetchResultSuccess) {
     put_bytes_cancel();
     app_cache_remove_entry(s_fetch_state.app_id);
@@ -153,11 +163,32 @@ void prv_put_bytes_event_system_task_cb(void *data) {
   PebblePutBytesEvent *pb_event = (PebblePutBytesEvent *)data;
 
   if (!s_fetch_state.in_progress) {
-    return;
+    goto finally;
+  }
+
+  s_fetch_debug.put_bytes_event_count++;
+  s_fetch_debug.last_put_bytes_event_type = pb_event->type;
+  s_fetch_debug.last_put_bytes_object_type = pb_event->object_type;
+  s_fetch_debug.last_put_bytes_progress_percent = pb_event->progress_percent;
+  s_fetch_debug.last_put_bytes_failed = pb_event->failed;
+  switch (pb_event->type) {
+    case PebblePutBytesEventTypeStart:
+      s_fetch_debug.put_bytes_start_count++;
+      break;
+    case PebblePutBytesEventTypeProgress:
+      s_fetch_debug.put_bytes_progress_count++;
+      break;
+    case PebblePutBytesEventTypeCleanup:
+      s_fetch_debug.put_bytes_cleanup_count++;
+      break;
+    case PebblePutBytesEventTypeInitTimeout:
+      s_fetch_debug.put_bytes_timeout_count++;
+      break;
   }
 
   // If put_bytes has failed, let's just say fail and stop everything.
   if (pb_event->failed == true) {
+    s_fetch_debug.put_bytes_failure_count++;
     AppFetchResult error;
     if (s_fetch_state.cancelling) {
       PBL_LOG_WRN("Put bytes cancelled by user");
@@ -262,6 +293,11 @@ static void prv_app_fetch_binaries_system_task_cb(void *data) {
   // check if Bluetooth is active. If so, this will send.
   bool successful = comm_session_send_data(comm_session_get_system_session(), APP_FETCH_ENDPOINT_ID,
       (uint8_t*)request, sizeof(AppFetchInstallRequest), COMM_SESSION_DEFAULT_TIMEOUT);
+  if (successful) {
+    s_fetch_debug.request_send_ok_count++;
+  } else {
+    s_fetch_debug.request_send_fail_count++;
+  }
 
   // log it
   char uuid_buffer[UUID_STRING_BUFFER_LENGTH];
@@ -290,6 +326,7 @@ void prv_handle_app_fetch_install_response(uint8_t result_code) {
   switch (result_code) {
     case APP_FETCH_RESPONSE_STARTING:
       PBL_LOG_INFO("Phone confirmed it will start sending data");
+      s_fetch_state.phone_started = true;
       prv_put_event_simple(AppFetchEventTypeStart);
       put_bytes_expect_init(FETCH_TIMEOUT_MS);
       break;
@@ -304,6 +341,11 @@ void prv_handle_app_fetch_install_response(uint8_t result_code) {
     case APP_FETCH_RESPONSE_NO_DATA:
       PBL_LOG_WRN("Error: No data on phone");
       prv_cleanup(AppFetchResultNoData);
+      break;
+    default:
+      PBL_LOG_ERR("Invalid app fetch response result: %u", result_code);
+      s_fetch_debug.response_invalid_count++;
+      prv_cleanup(AppFetchResultGeneralFailure);
       break;
   }
 }
@@ -323,10 +365,12 @@ void app_fetch_binaries(const Uuid *uuid, AppInstallId app_id, bool has_worker) 
 
   // reset all state
   s_fetch_state = (AppFetchState){};
+  s_fetch_debug.request_count++;
 
   // Mark whether the worker needs to be sent over.
   s_fetch_state.worker = !has_worker;
   s_fetch_state.app_id = app_id;
+  s_fetch_state.request_uuid = *uuid;
   s_fetch_state.in_progress = true;
 
   // populate fields
@@ -349,6 +393,24 @@ AppFetchError app_fetch_get_previous_error(void) {
   };
 
   return error;
+}
+
+void app_fetch_get_debug_info(AppFetchDebugInfo *info) {
+  if (!info) {
+    return;
+  }
+
+  *info = s_fetch_debug;
+  info->app_id = s_fetch_state.app_id;
+  info->request_uuid = s_fetch_state.request_uuid;
+  info->total_size = s_fetch_state.total_size;
+  info->prev_error = s_fetch_state.prev_error;
+  info->cancelling = s_fetch_state.cancelling;
+  info->in_progress = s_fetch_state.in_progress;
+  info->phone_started = s_fetch_state.phone_started;
+  info->app_done = s_fetch_state.app;
+  info->worker_done = s_fetch_state.worker;
+  info->resources_done = s_fetch_state.resources;
 }
 
 static void prv_cancel_fetch_from_system_task(void *data) {
@@ -391,7 +453,11 @@ typedef struct __attribute__((__packed__)) {
 } AppFetchResponseData;
 
 //! System task callback triggered by app_fetch_protocol_msg_callback().
-static void prv_app_fetch_protocol_handle_msg(AppFetchResponseData *response_data) {
+static void prv_app_fetch_protocol_handle_msg(AppFetchResponseData *response_data, size_t length) {
+  s_fetch_debug.response_count++;
+  s_fetch_debug.last_response_length = length;
+  s_fetch_debug.last_response_command = response_data->command;
+  s_fetch_debug.last_response_result = response_data->result_code;
 
   switch (response_data->command) {
     case APP_FETCH_INSTALL_RESPONSE:
@@ -400,6 +466,7 @@ static void prv_app_fetch_protocol_handle_msg(AppFetchResponseData *response_dat
     default:
       PBL_LOG_ERR("Invalid message received, command: %u result: %u",
           response_data->command, response_data->result_code);
+      s_fetch_debug.response_invalid_count++;
       prv_cleanup(AppFetchResultGeneralFailure);
       break;
   }
@@ -410,6 +477,8 @@ static void prv_app_fetch_protocol_handle_msg(AppFetchResponseData *response_dat
 void app_fetch_protocol_msg_callback(CommSession *session, const uint8_t *data, size_t length) {
   if (length < sizeof(AppFetchResponseData)) {
     PBL_LOG_ERR("Invalid message length %"PRIu32"", (uint32_t)length);
+    s_fetch_debug.response_short_count++;
+    s_fetch_debug.last_response_length = length;
     prv_cleanup(AppFetchResultGeneralFailure);
     return;
   }
@@ -419,5 +488,5 @@ void app_fetch_protocol_msg_callback(CommSession *session, const uint8_t *data, 
     return;
   }
 
-  prv_app_fetch_protocol_handle_msg((AppFetchResponseData *)data);
+  prv_app_fetch_protocol_handle_msg((AppFetchResponseData *)data, length);
 }

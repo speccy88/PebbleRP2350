@@ -100,6 +100,11 @@ config BOARD_FAMILY_FRUITJAM
     help
       Hidden symbol selected by boards in the Fruit Jam family.
 
+config BOARD_FAMILY_PICO2_W
+    bool
+    help
+      Hidden symbol selected by Raspberry Pi Pico 2 W board profiles.
+
 config BOARD_FAMILY_NAME
     string
     help

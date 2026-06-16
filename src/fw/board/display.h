@@ -36,6 +36,8 @@ typedef struct {
 #include "displays/display_qemu_gabbro.h"
 #elif defined(CONFIG_BOARD_FRUITJAM_RP2350)
 #include "displays/display_fruitjam_rp2350.h"
+#elif defined(CONFIG_BOARD_PICO2_W_RP2350)
+#include "displays/display_pico2_w_rp2350.h"
 #else
 #error "Unknown display definition for board"
 #endif // BOARD_*

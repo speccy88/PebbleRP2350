@@ -4,6 +4,7 @@
 #include "drivers/uart/rp2350.h"
 
 #include "FreeRTOS.h"
+#include "soc/rp2350/rp2350/hardware/clocks.h"
 
 #include <cmsis_core.h>
 #include <stdbool.h>
@@ -15,7 +16,6 @@
 #define IO_BANK0_BASE 0x40028000U
 #define PADS_BANK0_BASE 0x40038000U
 #define RESETS_BASE 0x40020000U
-#define CLOCKS_BASE 0x40010000U
 
 #define IO_BANK0_GPIO_CTRL(pin) (IO_BANK0_BASE + ((pin) * 8U) + 4U)
 #define PADS_BANK0_GPIO(pin) (PADS_BANK0_BASE + 4U + ((pin) * 4U))
@@ -27,12 +27,6 @@
 
 #define RESETS_RESET_OFFSET 0x00U
 #define RESETS_RESET_DONE_OFFSET 0x08U
-
-#define CLOCKS_CLK_PERI_CTRL_OFFSET 0x48U
-#define CLOCKS_CLK_PERI_DIV_OFFSET 0x4cU
-#define CLOCKS_CLK_PERI_CTRL_ENABLE_BITS (1U << 11)
-#define CLOCKS_CLK_PERI_CTRL_ENABLED_BITS (1U << 28)
-#define CLOCKS_CLK_PERI_DIV_1 0x00010000U
 
 #define UART_UARTDR_OFFSET 0x00U
 #define UART_UARTRSR_OFFSET 0x04U
@@ -80,7 +74,7 @@
 #define UART_UARTIMSC_PEIM_BITS 0x00000100U
 #define UART_UARTIMSC_BEIM_BITS 0x00000200U
 #define UART_UARTIMSC_OEIM_BITS 0x00000400U
-#define UART_UARTIMSC_RX_ERROR_BITS                                                   \
+#define UART_UARTIMSC_RX_ERROR_BITS                                              \
   (UART_UARTIMSC_FEIM_BITS | UART_UARTIMSC_PEIM_BITS | UART_UARTIMSC_BEIM_BITS | \
    UART_UARTIMSC_OEIM_BITS)
 
@@ -91,8 +85,6 @@
 
 #define UART_UARTICR_ALL_BITS 0x000007ffU
 
-extern uint32_t SystemCoreClock;
-
 static void prv_delay_cycles(uint32_t cycles) {
   for (volatile uint32_t i = 0; i < cycles; ++i) {
     __asm__ volatile("nop");
@@ -102,16 +94,6 @@ static void prv_delay_cycles(uint32_t cycles) {
 static void prv_gpio_set_function(uint8_t pin, uint8_t function) {
   REG32(PADS_BANK0_GPIO(pin)) = GPIO_PAD_NORMAL;
   REG32(IO_BANK0_GPIO_CTRL(pin)) = function;
-}
-
-static void prv_enable_clk_peri_from_clk_sys(void) {
-  REG32(CLOCKS_BASE + CLOCKS_CLK_PERI_CTRL_OFFSET) = 0U;
-  REG32(CLOCKS_BASE + CLOCKS_CLK_PERI_DIV_OFFSET) = CLOCKS_CLK_PERI_DIV_1;
-  REG32(CLOCKS_BASE + CLOCKS_CLK_PERI_CTRL_OFFSET) = CLOCKS_CLK_PERI_CTRL_ENABLE_BITS;
-
-  while (!(REG32(CLOCKS_BASE + CLOCKS_CLK_PERI_CTRL_OFFSET) &
-           CLOCKS_CLK_PERI_CTRL_ENABLED_BITS)) {
-  }
 }
 
 static void prv_reset_uart(UARTDevice *dev) {
@@ -159,7 +141,7 @@ static void prv_init(UARTDevice *dev, bool tx_enabled, bool rx_enabled) {
   dev->state->rx_int_enabled = false;
   dev->state->tx_int_enabled = false;
 
-  prv_enable_clk_peri_from_clk_sys();
+  rp2350_clk_peri_enable_xosc();
   prv_reset_uart(dev);
 
   REG32(dev->base_addr + UART_UARTCR_OFFSET) = 0U;
@@ -218,7 +200,7 @@ void uart_set_baud_rate(UARTDevice *dev, uint32_t baud_rate) {
     return;
   }
 
-  const uint64_t scaled_divisor = ((uint64_t)8U * SystemCoreClock / baud_rate) + 1U;
+  const uint64_t scaled_divisor = ((uint64_t)8U * RP2350_XOSC_HZ / baud_rate) + 1U;
   uint32_t baud_ibrd = (uint32_t)(scaled_divisor >> 7);
   uint32_t baud_fbrd;
 
@@ -313,8 +295,8 @@ void uart_set_tx_interrupt_handler(UARTDevice *dev, UARTTXInterruptHandler irq_h
 
 void uart_set_rx_interrupt_enabled(UARTDevice *dev, bool enabled) {
   uint32_t mask = REG32(dev->base_addr + UART_UARTIMSC_OFFSET);
-  const uint32_t rx_mask = UART_UARTIMSC_RXIM_BITS | UART_UARTIMSC_RTIM_BITS |
-                           UART_UARTIMSC_RX_ERROR_BITS;
+  const uint32_t rx_mask =
+      UART_UARTIMSC_RXIM_BITS | UART_UARTIMSC_RTIM_BITS | UART_UARTIMSC_RX_ERROR_BITS;
 
   if (enabled) {
     dev->state->rx_int_enabled = true;
@@ -345,8 +327,8 @@ void uart_irq_handler(UARTDevice *dev) {
   bool should_context_switch = false;
   const uint32_t masked_status = REG32(dev->base_addr + UART_UARTMIS_OFFSET);
 
-  if ((masked_status & (UART_UARTMIS_RXMIS_BITS | UART_UARTMIS_RTMIS_BITS |
-                        UART_UARTMIS_ERROR_BITS)) != 0U) {
+  if ((masked_status &
+       (UART_UARTMIS_RXMIS_BITS | UART_UARTMIS_RTMIS_BITS | UART_UARTMIS_ERROR_BITS)) != 0U) {
     while (dev->state->rx_int_enabled && uart_is_rx_ready(dev)) {
       const uint32_t data = REG32(dev->base_addr + UART_UARTDR_OFFSET);
       UARTRXErrorFlags error_flags = prv_error_flags_from_dr(data);
@@ -356,8 +338,7 @@ void uart_irq_handler(UARTDevice *dev) {
       }
 
       if (dev->state->rx_irq_handler) {
-        should_context_switch |=
-            dev->state->rx_irq_handler(dev, (uint8_t)data, &error_flags);
+        should_context_switch |= dev->state->rx_irq_handler(dev, (uint8_t)data, &error_flags);
       }
     }
 

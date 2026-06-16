@@ -314,6 +314,8 @@ status_t flash_impl_write_security_register(uint32_t addr, uint8_t val);
 //! @returns The information about the security registers.
 const FlashSecurityRegisters *flash_impl_security_registers_info(void);
 
+void flash_impl_get_debug_info(FlashDebugInfo *info);
+
 #ifdef CONFIG_RECOVERY_FW
 //! Lock security register
 //!
